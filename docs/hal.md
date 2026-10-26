@@ -36,9 +36,10 @@ HAL 是框架与硬件之间**唯一**的耦合点。框架里没有一行平台
 - [11. 默认实现](#11-默认实现)
 - [12. 编写一个后端](#12-编写一个后端)
 - [13. 完整参考实现：SSD1306](#13-完整参考实现ssd1306)
-- [14. 测试后端](#14-测试后端)
-- [15. 性能与资源](#15-性能与资源)
-- [16. 检查清单](#16-检查清单)
+- [14. 内置的内存后端（hal_vbuf）](#14-内置的内存后端hal_vbuf)
+- [15. 测试后端](#15-测试后端)
+- [16. 性能与资源](#16-性能与资源)
+- [17. 检查清单](#17-检查清单)
 ## 1. 设计模型
 
 C 没有虚函数，所以用一个**函数指针表 + 单例**来模拟多态：
@@ -1162,7 +1163,135 @@ for (;;) {
 
 ---
 
-## 14. 测试后端
+---
+
+## 14. 内置的内存后端（`hal_vbuf`）
+
+框架自带一个**不驱动任何硬件**的后端：所有绘制都落到一块 RAM 里的 1bpp 页缓冲区，
+由使用者自己决定何时、如何把它推送出去。它没有任何平台依赖，能编译进 PC 程序、
+单元测试和 MCU 固件。
+
+### 14.1 用途
+
+| 场景 | 为什么合适 |
+|---|---|
+| 先跑通界面，再接硬件 | 不需要写任何驱动就能看到布局与动画 |
+| 单元测试 / CI | 纯内存，可断言像素，无需窗口 |
+| 只关心"画出来"的宿主 | 你已经有自己的刷新逻辑（DMA、双缓冲、I²C 队列） |
+| 离屏渲染 / 截图 | 一帧就是 1024 字节，随时可存成 PBM |
+
+### 14.2 缓冲区布局
+
+与 SSD1306 GDDRAM **完全一致**，所以你现有的"按页写 128 字节"代码可以直接复用：
+
+```
+byte_index = (y * width + x) / 8
+bit        = 7 - (x % 8)      /* bit7 = 最左像素 */
+size       = tile_w * tile_h * 8 = width * height / 8
+```
+
+128×64 时是 1024 字节；8 个 page，每 page 128 字节，页内 128 个像素横向排布。
+
+### 14.3 用法
+
+```c
+#include "hal_vbuf.h"
+
+/* 堆：实例和画布一起分配，hal_destroy() 一并释放 */
+hal_inject(hal_vbuf_create(NULL));            /* NULL => 128x64 */
+
+/* 或者自己给尺寸 */
+hal_vbuf_config cfg;
+hal_vbuf_config_default(&cfg);
+cfg.width = 96;
+cfg.height = 48;
+hal_inject(hal_vbuf_create(&cfg));
+```
+
+两种把画面交出去的方式：
+
+```c
+/* 1. 回调：每次 hal_canvas_update() 结束时被调用 */
+static void my_flush(void *user, const uint8_t *buffer, int w, int h) {
+  ssd1306_write_pages(buffer, (size_t) w * h / 8);   /* 你的传输层 */
+}
+hal_vbuf_set_flush(my_flush, NULL);
+
+/* 2. 主动取：适合放到自己的刷新任务里 */
+const uint8_t *buf = hal_vbuf_canvas();
+int w = hal_vbuf_width();
+int h = hal_vbuf_height();
+```
+
+### 14.4 输入与时间
+
+后端没有按键 GPIO，也没有定时器，两者都由宿主注入：
+
+```c
+hal_vbuf_set_key(ASTRA_KEY_1, true);   /* 按下 */
+hal_vbuf_set_key(ASTRA_KEY_1, false);  /* 松开 */
+
+hal_vbuf_advance(16);                  /* 每帧推进 16 ms 虚拟时钟 */
+```
+
+`delay_ms()` 在这里**不阻塞**，只推进虚拟时钟，所以 headless 跑 N 帧是瞬时的。
+真实节奏由 `hal_vbuf_advance()` 的调用频率决定。
+
+### 14.5 静态存储（MCU）
+
+```c
+static hal_vbuf  s_vbuf;
+static uint8_t   s_canvas[128 * 64 / 8];      /* 1024 B */
+
+hal_vbuf_config cfg;
+hal_vbuf_config_default(&cfg);
+hal_vbuf_init_static(&s_vbuf, &cfg, s_canvas, sizeof(s_canvas));
+hal_inject(&s_vbuf.base);
+
+/* ... */
+
+hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
+```
+
+`hal_vbuf_init_static()` 会在数组太小时返回 `NULL`，不会越界。
+
+### 14.6 字体
+
+`include/hal_vbuf.h` 导出三个句柄（`hal_vbuf_font_main` / `..._logo_title` /
+`..._logo_copyright`），它们都指向同一套**内置 6×12 ASCII 点阵**（0x20–0x7E）：
+
+- `hal_get_font_height()` 恒为 12
+- `hal_get_font_width()` 为 `字符数 × 6`
+- 非 ASCII 码点（中文等）绘制为 6×12 空心框，表示"缺字形"
+
+需要中文时，请实现自己的后端（框架只把字符串原样传给后端）。
+
+### 14.7 尺寸规则
+
+| 规则 | 说明 |
+|---|---|
+| `width`/`height` 必须是 8 的倍数 | 页对齐 |
+| 0 表示"用默认值" | 宽 0 → 128，高 0 → 64 |
+| 负值或非 8 倍数会被拒绝 | `hal_vbuf_create()` 返回 `NULL` |
+| 上限 2040 | 保证 tile 数能放进 `uint8_t` 契约 |
+
+### 14.8 与硬件后端的行为差异
+
+| 项 | `hal_vbuf` | 真实硬件后端 |
+|---|---|---|
+| `canvas_update` | 调用 flush 回调 | 把缓冲区发到面板 |
+| `delay_ms` | 推进虚拟时钟 | 真阻塞 |
+| `millis` | 虚拟时钟 | 硬件 tick |
+| 按键 | 宿主注入 | 扫描 GPIO/矩阵 |
+| 字体 | 内置 6×12 点阵 | 由你决定（TTF 栅格化、字库芯片…） |
+| 内存 | 画布 1 KiB（128×64） | 通常还要一份面板镜像 |
+
+自测：`tests/test_vbuf.c` 覆盖 15 项，包括页布局、三种绘制模式、裁剪、
+刷新回调、按键注入、虚拟时钟、静态存储与销毁顺序。
+
+---
+
+## 15. 测试后端
 
 框架核心不依赖显示器，所以可以在 PC 上用"计数后端"跑单元测试。
 `tests/test_hal.c`（本工程自带）就是这么做的，可直接参考：
@@ -1196,7 +1325,7 @@ hal_inject(&f.base);
 
 ---
 
-## 15. 性能与资源
+## 16. 性能与资源
 
 ### 内存
 
@@ -1231,7 +1360,7 @@ hal_inject(&f.base);
 
 ---
 
-## 16. 检查清单
+## 17. 检查清单
 
 实现新后端时逐条确认：
 

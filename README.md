@@ -32,12 +32,13 @@
 ## 特性
 
 - **纯 C99**，除后端外无外部依赖（只用 `<stdint.h>` `<stdbool.h>` `<string.h>` `<math.h>`）
+- **自带两种后端**：`hal_vbuf`（纯内存，零依赖，你负责刷新）与你自己实现的硬件后端
 - **分辨率是运行期数据**：面板尺寸由后端在初始化时报告，框架据此自适应布局
 - **零堆分配**：界面对象全部来自固定大小的静态池
 - **两种页面**：磁贴页（图标 + 横向滚动）与列表页（文字 + 纵向滚动）
 - **内建动画**：页面进出、选择框补间、相机平滑滚动、开机 Logo
 - **后端可替换**：实现一张函数指针表即可换平台，框架无需重新编译
-- **可测试**：核心逻辑不依赖显示器，自带 headless 自测（16 项，不链接任何图形库）
+- **可测试**：核心逻辑不依赖显示器，自带 headless 自测（31 项，不链接任何图形库）
 
 ## 目录结构
 
@@ -49,12 +50,14 @@ Inc/astra/                      ← 本工程根目录
 │   ├── astra_types.h           数据类型与容量宏
 │   ├── astra_config.h          配置结构体与默认值
 │   ├── hal.h                   硬件抽象层（ops 表 + 单例 + 内联转发）
+│   ├── hal_vbuf.h              内存后端：所有操作只写像素缓冲区
 │   ├── item.h                  menu / selector / camera / 动画
 │   ├── launcher.h              页面调度与弹窗
 │   └── logo.h                  开机动画
 ├── src/                        实现（不对外暴露）
 │   ├── astra_config.c
 │   ├── hal.c
+│   ├── hal_vbuf.c              内存后端实现 + 内置 6x12 ASCII 字模
 │   ├── item.c
 │   ├── launcher.c
 │   └── logo.c
@@ -65,7 +68,8 @@ Inc/astra/                      ← 本工程根目录
 │   ├── api.md                  应用层 API 参考
 │   └── hal.md                  硬件抽象层详解与后端适配指南
 └── tests/
-    └── test_hal.c              框架自测（16 项，不需要窗口）
+    ├── test_hal.c              框架自测（16 项，不需要窗口）
+    └── test_vbuf.c             内存后端自测（15 项）
 ```
 
 依赖方向严格单向，框架位于最底层：
@@ -93,17 +97,50 @@ Inc\astra\build\Debug\astra_test_hal.exe
 
 | 目标 | 内容 |
 |---|---|
-| `astra` | 框架静态库（零平台依赖） |
+| `astra` | 框架静态库 + 内存后端（零平台依赖） |
 | `astra_demo` | 示例应用静态库，用于证明 demo 只依赖框架公开头文件 |
 | `astra_test_hal` | 框架自测，16 项，不开窗口、不链接图形库 |
+| `astra_test_vbuf` | 内存后端自测，15 项，校验画布布局、绘制、刷新回调、按键 |
 
 也可以完全不用 CMake，把 `src/*.c` 加入你的工程、把 `include/` 加进 include 路径即可。
 
 ## 接入你的工程
 
-三步：
+三种接法，按依赖从少到多：
 
-**1. 实现一个后端**（见 [`docs/hal.md`](docs/hal.md)）
+### A. 用内置的内存后端（零依赖，最快上手）
+
+`hal_vbuf` 把全部操作写进一块 1bpp 页缓冲区，不碰任何硬件。你只需要在
+`hal_canvas_update()` 之后把缓冲区推给真实面板：
+
+```c
+#include "hal_vbuf.h"
+
+hal_inject(hal_vbuf_create(NULL));       /* NULL => 128x64 */
+hal_vbuf_set_flush(my_flush, &my_bus);   /* 每帧回调，可选 */
+
+/* ... 运行 UI ... */
+
+/* my_flush() 收到的是 SSD1306 GDDRAM 布局，直接按页发即可 */
+```
+
+没有回调也可以主动取：
+
+```c
+const uint8_t *buf = hal_vbuf_canvas();  /* (y * width + x) / 8 */
+int w = hal_vbuf_width();
+int h = hal_vbuf_height();
+```
+
+其它要点：
+
+- 按键用 `hal_vbuf_set_key(ASTRA_KEY_0/1, true/false)` 注入
+- 时间用 `hal_vbuf_advance(16)` 每帧推进；`hal_delay()` 不阻塞，只推进虚拟时钟
+- 静态存储（MCU 常用）：`hal_vbuf_init_static(&vbuf, &cfg, canvas, sizeof(canvas))`，
+  然后 `hal_inject(&vbuf.base)`，结束时 `hal_vbuf_deinit()`（不释放你的数组）
+- 内置 6x12 ASCII 字模，非 ASCII 码点画成空心框
+
+### B. 自己实现一个后端
 
 后端要做的是：填一张 `hal_ops` 函数指针表（从 `astra_hal_default_ops` 派生，
 避免漏填成员导致空指针），然后调用 `hal_construct()` 或 `hal_construct_owned()`
@@ -118,7 +155,7 @@ static const hal_ops my_ops = {
 };
 ```
 
-**2. 初始化框架并建菜单**
+**1. 初始化框架并建菜单**
 
 ```c
 hal_inject(backend);              /* 后端已构造完成 */
@@ -133,13 +170,18 @@ astra_menu_add_item(root, page);
 astra_launcher_init(&launcher, root, &selector, &camera);
 ```
 
-**3. 每帧调用一次渲染**
+**2. 每帧调用一次渲染**
 
 ```c
 astra_launcher_update(&launcher);   /* 清屏 → 画页面 → 画选择器 → 推进相机 → 送出显存 */
 ```
 
 开机动画是可选的：在 `astra_launcher_init()` 之前调用 `astra_draw_logo(110)`。
+
+### C. 桌面预览
+
+外层仓库的 `port/raylib/` 是一个把画布画进 raylib 窗口的后端，用宏切换：
+`-DASTRA_USE_VBUF=ON` 走内存后端，OFF 走 raylib 窗口。
 
 ## 示例应用
 
@@ -171,7 +213,7 @@ void astra_demo_back(void);       /* 可选：返回上级   */
 | 文档 | 内容 |
 |---|---|
 | [`docs/api.md`](docs/api.md) | 应用层 API：menu / selector / camera / launcher / 配置项 / 示例应用 |
-| [`docs/hal.md`](docs/hal.md) | 硬件抽象层：39 个 ops 成员逐个说明、生命周期、内存归属、两个完整后端实现、上板检查清单 |
+| [`docs/hal.md`](docs/hal.md) | 硬件抽象层：39 个 ops 成员逐个说明、生命周期、内存归属、内存后端、两个完整硬件后端实现、上板检查清单 |
 
 `docs/hal.md` 里带有 SSD1306（I²C/SPI 位操作）与裸机静态后端的完整代码，可以
 直接作为移植起点。

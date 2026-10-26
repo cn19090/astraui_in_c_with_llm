@@ -5,10 +5,11 @@
 #   cmake -S Inc/astra -B Inc/astra/build
 #   cmake --build Inc/astra/build
 #
-# 产出三个目标：
-#   astra        框架静态库（C99，零平台依赖）
-#   astra_demo   示例应用静态库（只调用 HAL，用于验证 demo 只依赖框架）
+# 产出四个目标：
+#   astra          框架静态库 + 内置的内存后端 hal_vbuf（C99，零平台依赖）
+#   astra_demo     示例应用静态库（只调用 HAL，用于验证 demo 只依赖框架头文件）
 #   astra_test_hal 框架自测（16 项，不需要窗口，不链接任何图形库）
+#   astra_test_vbuf 内存后端自测（15 项，校验画布布局、绘制、刷新回调、按键）
 #
 cmake_minimum_required(VERSION 3.16)
 
@@ -28,13 +29,15 @@ endif()
 
 # ---------------------------------------------------------------------------
 # 框架本体：不含任何平台头文件，只依赖 <stdint.h>/<stdbool.h>/<string.h>/<math.h>
+# hal_vbuf.c 是内置的"只写内存缓冲区"后端，同样没有平台依赖。
 # ---------------------------------------------------------------------------
 add_library(astra STATIC
     src/astra_config.c
     src/hal.c
     src/item.c
     src/launcher.c
-    src/logo.c)
+    src/logo.c
+    src/hal_vbuf.c)
 
 target_include_directories(astra PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -46,11 +49,14 @@ add_library(astra_demo STATIC demo/astra_demo.c)
 target_link_libraries(astra_demo PUBLIC astra)
 
 # ---------------------------------------------------------------------------
-# 框架自测：纯逻辑，无窗口、无后端
-#   cmake --build ... && astra_test_hal
+# 自测：纯逻辑，无窗口、无后端
+#   cmake --build ... && astra_test_hal / astra_test_vbuf
 # ---------------------------------------------------------------------------
-option(ASTRA_BUILD_TESTS "构建 astra 框架自测" ON)
+option(ASTRA_BUILD_TESTS "构建 astra 自测程序" ON)
 if(ASTRA_BUILD_TESTS)
     add_executable(astra_test_hal tests/test_hal.c)
     target_link_libraries(astra_test_hal PRIVATE astra)
+
+    add_executable(astra_test_vbuf tests/test_vbuf.c)
+    target_link_libraries(astra_test_vbuf PRIVATE astra)
 endif()

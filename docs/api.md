@@ -31,6 +31,7 @@
 | `astra_types.h` | 数据类型、容量宏 | — |
 | `astra_config.h` | 配置结构与默认值 | `astra_types.h` |
 | `hal.h` | HAL 接口（见 [hal.md](hal.md)） | `astra_types.h` |
+| `hal_vbuf.h` | 内存后端（见 [hal.md](hal.md) 第 14 章） | `hal.h` |
 | `item.h` | 菜单、选择框、相机、动画 | 上述三者 |
 | `launcher.h` | 页面调度与弹窗 | `item.h` |
 | `logo.h` | 开机动画 | `hal.h` |
@@ -619,7 +620,6 @@ astra_demo_init(&hal_raylib_font_main, &hal_raylib_font_logo_title,
 ---
 
 ## 11. 生命周期与内存
-
 ### 分配点
 
 | 资源 | 方式 |
