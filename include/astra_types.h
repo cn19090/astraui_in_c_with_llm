@@ -3,6 +3,12 @@
 //
 // Plain structs and enums with no logic. Every other module depends on these.
 //
+// astra is a C99 port of "astra UI" (C++), upstream:
+//   https://github.com/AstraThreshold/oled-ui-astra
+// API names and semantics follow the upstream library; see README.md for the
+// C++ -> C mapping (virtual functions -> hal_ops, containers -> static pools,
+// compile-time resolution -> runtime configuration).
+//
 #ifndef ASTRA_TYPES_H_
 #define ASTRA_TYPES_H_
 

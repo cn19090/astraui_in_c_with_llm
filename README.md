@@ -2,6 +2,13 @@
 
 一个用 **C99** 编写的单色 OLED 菜单框架，面向 128×64（以及其它 1bpp 尺寸）的小屏设备。
 
+> **来源**
+> 本工程是 [astra UI](https://github.com/AstraThreshold/oled-ui-astra) 的 **C99 移植版本**。
+> 上游本体仓库：<https://github.com/AstraThreshold/oled-ui-astra>（C++，作者 dcfsswindy
+> 及社区贡献者）。界面形态、页面结构、动画参数与视觉比例均以上游为准；本工程保留
+> 同一套 API 语义，把 C++ 的类继承与虚函数改写为 C 的函数指针表（`hal_ops`）与扁平化
+> 结构体，并把显示分辨率从编译期常量改为运行期数据。上游的许可与致谢同样适用于本工程。
+
 框架本身**不含一行平台代码**：所有绘制、计时、按键都经一张可替换的函数指针表
 （HAL）转发。因此同一份框架代码可以跑在 SSD1306、raylib 窗口、SDL 或纯内存
 测试桩上，无需改动任何一行。
@@ -240,11 +247,30 @@ astra_config_fit_to_screen(astra_ui_config(), sys->screen_weight, sys->screen_he
 - 磁贴图标是固定尺寸素材，`tile_pic_width/height` 必须等于位图真实尺寸，
   否则 `draw_bmp` 会按错误的行宽解读数据
 
+## 与上游 astra UI 的关系
+
+本工程移植自 <https://github.com/AstraThreshold/oled-ui-astra>（C++）。对应关系：
+
+| 上游（C++） | 本工程（C99） |
+|---|---|
+| `astra::hal` 抽象基类 + 派生后端 | `hal` 结构体 + `hal_ops` 函数指针表 |
+| 虚函数调用 | `h->ops->draw_line(h, ...)` 间接调用 + `hal.h` 里的内联转发 |
+| 构造函数里初始化成员 | `hal_construct()` / `hal_construct_owned()` + `astra_config_default()` |
+| `std::vector` / 动态容器 | 固定容量静态池（32 个页面 × 8 项） |
+| `sys::config` / `astra::config` | `astra_sys_config` / `astra_config` |
+| 编译期固定的 128×64 | 运行期由后端报告的 `screen_weight/height` |
+| 后端放在框架内 | 后端移出框架，只通过 `hal_ops` 接触框架 |
+| 依赖 Arduino / U8g2 | 零平台依赖，只依赖 `<stdint.h>` `<stdbool.h>` `<string.h>` `<math.h>` |
+
+行为与观感保持与上游一致（同样的磁贴/列表布局、同样的动画曲线、同样的开机 Logo
+时间轴）；差异集中在语言特性替换、内存策略与分辨率解耦三处。
+
 ## 致谢
 
-界面视觉设计（磁贴 / 列表 / 选择框 / 开机动画的动效与比例）来自
-[astra UI](https://github.com/AstraThreshold/oled-ui-astra) 项目，感谢原作者
-dcfsswindy 与社区贡献者。本工程是同一套视觉语言的 C99 实现。
+界面视觉设计（磁贴 / 列表 / 选择框 / 开机动画的动效与比例）、页面结构与交互模型
+全部来自 [astra UI](https://github.com/AstraThreshold/oled-ui-astra) 项目，感谢原作者
+dcfsswindy 与社区贡献者。本工程是同一套视觉语言的 C99 移植实现；若你要用 C++，
+建议直接使用上游本体。
 
 ## 许可
 

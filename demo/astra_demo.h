@@ -4,6 +4,9 @@
 // 这一层不依赖任何平台：它只调用 astra 的 HAL，由外壳（main.c、RTOS 任务等）
 // 负责注入后端并驱动 init/update/destroy。
 //
+// astra 是 astra UI（C++）的 C99 移植版本，上游：
+//   https://github.com/AstraThreshold/oled-ui-astra
+//
 #ifndef ASTRA_DEMO_H_
 #define ASTRA_DEMO_H_
 

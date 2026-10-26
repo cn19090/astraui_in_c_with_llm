@@ -13,6 +13,11 @@
 // Callers never touch the table directly; they use the inline wrappers at the
 // bottom of this header (hal_draw_pixel(), hal_canvas_update(), ...).
 //
+// astra is a C99 port of "astra UI" (C++), upstream:
+//   https://github.com/AstraThreshold/oled-ui-astra
+// The upstream `astra::hal` abstract base class maps onto this ops table; the
+// contracts are the same, only the dispatch mechanism differs (see docs/hal.md).
+//
 #ifndef ASTRA_HAL_H_
 #define ASTRA_HAL_H_
 

@@ -8,6 +8,10 @@
 // 换成别的分辨率需要自行调整 config 里的间距，或改用
 // astra_config_fit_to_screen()。
 //
+// astra 是 astra UI（C++）的 C99 移植版本，上游：
+//   https://github.com/AstraThreshold/oled-ui-astra
+// 本示例的菜单结构与视觉设计沿用上游的示例工程。
+//
 #include "astra_demo.h"
 
 #include <string.h>

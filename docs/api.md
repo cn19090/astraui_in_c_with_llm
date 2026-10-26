@@ -2,6 +2,13 @@
 
 面向应用开发者的接口说明。头文件位于本工程的 `include/`，全部为 C99。
 
+> **来源**：本框架移植自 [astra UI](https://github.com/AstraThreshold/oled-ui-astra)
+> （C++ 单色 OLED 菜单库）。下文所有 API 的名字与语义尽量与上游保持一致：
+> `astra::menu` → `astra_menu`、`astra::selector` → `astra_selector`、
+> `astra::camera` → `astra_camera`、`astra::launcher` → `astra_launcher`。
+> 语言层面的差异（虚函数 → `hal_ops` 函数指针表、动态容器 → 静态池、
+> 编译期分辨率 → 运行期配置）见 [../README.md](../README.md#与上游-astra-ui-的关系)。
+
 - [1. 头文件与包含顺序](#1-头文件与包含顺序)
 - [2. 数据类型](#2-数据类型)
 - [3. 配置](#3-配置)
