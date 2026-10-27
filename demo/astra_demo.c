@@ -91,8 +91,9 @@ static astra_selector s_selector;
 static astra_camera s_camera;
 static astra_menu *s_root; /* 根页面 */
 
-static bool s_key_down[ASTRA_KEY_NUM];             /* 上一帧的电平，用于边沿检测 */
-static unsigned long s_key_down_at[ASTRA_KEY_NUM]; /* 按下的时刻，用于长按判定 */
+static bool s_key_down[ASTRA_DEMO_KEY_NUM];             /* 上一帧的电平，用于边沿检测 */
+static unsigned long s_key_down_at[ASTRA_DEMO_KEY_NUM]; /* 按下的时刻，用于长按判定 */
+static bool s_key_level[ASTRA_DEMO_KEY_NUM];            /* 外壳注入的当前电平 */
 
 /* ------------------------------------------------------------------------ */
 /* 导航                                                                      */
@@ -145,41 +146,51 @@ void astra_demo_back(void)
   astra_launcher_close(&s_launcher);
 }
 
+/* 输入层入口：外壳把平台按键翻译成两个逻辑键的电平塞进来。
+   HAL 只负责屏幕，输入是应用自己的事。 */
+void astra_demo_key_set(astra_demo_key key, bool down)
+{
+  if (key < 0 || key >= ASTRA_DEMO_KEY_NUM)
+    return;
+
+  s_key_level[key] = down;
+}
+
 /* 两个逻辑键：短按切换高亮项，长按进入/退出下级页面。 */
 static void handle_keys(void)
 {
-  /* 步骤 1：取一次时间戳和两个键的当前电平。 */
+  /* 步骤 1：取一次时间戳和两个键的当前电平（来自输入层）。 */
   const unsigned long now = hal_millis();
-  const bool k0 = hal_get_key(ASTRA_KEY_0);
-  const bool k1 = hal_get_key(ASTRA_KEY_1);
+  const bool k_prev = s_key_level[ASTRA_DEMO_KEY_PREV];
+  const bool k_next = s_key_level[ASTRA_DEMO_KEY_NEXT];
 
-  /* 步骤 2：捕获下降/上升沿——刚按下的那一刻记下时间。 */
-  if (k0 && !s_key_down[ASTRA_KEY_0])
-    s_key_down_at[ASTRA_KEY_0] = now;
-  if (k1 && !s_key_down[ASTRA_KEY_1])
-    s_key_down_at[ASTRA_KEY_1] = now;
+  /* 步骤 2：捕获上升沿——刚按下的那一刻记下时间。 */
+  if (k_prev && !s_key_down[ASTRA_DEMO_KEY_PREV])
+    s_key_down_at[ASTRA_DEMO_KEY_PREV] = now;
+  if (k_next && !s_key_down[ASTRA_DEMO_KEY_NEXT])
+    s_key_down_at[ASTRA_DEMO_KEY_NEXT] = now;
 
-  /* 步骤 3：键 0 松开时结算——长按返回上级，短按上移一项。 */
-  if (!k0 && s_key_down[ASTRA_KEY_0])
+  /* 步骤 3：「上一个」松开时结算——长按返回上级，短按上移一项。 */
+  if (!k_prev && s_key_down[ASTRA_DEMO_KEY_PREV])
   {
-    if ((now - s_key_down_at[ASTRA_KEY_0]) >= LONG_PRESS_MS)
+    if ((now - s_key_down_at[ASTRA_DEMO_KEY_PREV]) >= LONG_PRESS_MS)
       astra_demo_back();
     else
       move_selection(-1);
   }
 
-  /* 步骤 4：键 1 松开时结算——长按进入下级，短按下移一项。 */
-  if (!k1 && s_key_down[ASTRA_KEY_1])
+  /* 步骤 4：「下一个」松开时结算——长按进入下级，短按下移一项。 */
+  if (!k_next && s_key_down[ASTRA_DEMO_KEY_NEXT])
   {
-    if ((now - s_key_down_at[ASTRA_KEY_1]) >= LONG_PRESS_MS)
+    if ((now - s_key_down_at[ASTRA_DEMO_KEY_NEXT]) >= LONG_PRESS_MS)
       astra_demo_activate();
     else
       move_selection(1);
   }
 
   /* 步骤 5：保存本帧电平，供下一帧做边沿检测。 */
-  s_key_down[ASTRA_KEY_0] = k0;
-  s_key_down[ASTRA_KEY_1] = k1;
+  s_key_down[ASTRA_DEMO_KEY_PREV] = k_prev;
+  s_key_down[ASTRA_DEMO_KEY_NEXT] = k_next;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -214,6 +225,7 @@ bool astra_demo_init(const uint8_t *main_font, const uint8_t *logo_title_font,
   /* 步骤 6：清空按键历史，避免把上一次运行残留的电平当成一次按下。 */
   memset(s_key_down, 0, sizeof(s_key_down));
   memset(s_key_down_at, 0, sizeof(s_key_down_at));
+  memset(s_key_level, 0, sizeof(s_key_level));
 
   /* 步骤 7：先停顿 200 ms 让屏幕稳定，再播开机动画。 */
   hal_delay(200);
@@ -284,6 +296,7 @@ void astra_demo_destroy(void)
   memset(&s_selector, 0, sizeof(s_selector));
   memset(&s_camera, 0, sizeof(s_camera));
   memset(s_key_down, 0, sizeof(s_key_down));
+  memset(s_key_level, 0, sizeof(s_key_level));
 
   /* 步骤 2：回收对象池。后端由外壳持有，这里刻意不动它。 */
   astra_menu_pool_reset();

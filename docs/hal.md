@@ -1,7 +1,12 @@
 # astra 硬件抽象层（HAL）详解
 
-HAL 是框架与硬件之间**唯一**的耦合点。框架里没有一行平台代码，全部绘制、
-计时、按键、外设操作都经过这里。实现一张函数指针表，就能把 astra 跑到一个新平台上。
+HAL 是框架与屏幕之间**唯一**的耦合点。框架里没有一行平台代码，全部绘制、
+计时、外设操作都经过这里。实现一张函数指针表，就能把 astra 跑到一个新平台上。
+
+**HAL 只负责屏幕**：不含任何用户输入（按键 / 触摸 / 编码器）接口。输入策略
+由应用自己实现——多按键、矩阵键盘、旋钮、触摸各家的做法都不同，硬塞进框架
+只会变成无用的抽象。示例应用在 `demo/astra_demo.h` 里自己定义了两个逻辑键
+和短按/长按判定，外壳只需调用 `astra_demo_key_set()`。
 
 > **来源**：本框架移植自 [astra UI](https://github.com/AstraThreshold/oled-ui-astra)。
 > 上游用一个 `astra::hal` 抽象基类定义硬件契约、由派生类实现各个后端
@@ -31,7 +36,7 @@ HAL 是框架与硬件之间**唯一**的耦合点。框架里没有一行平台
 - [6. 绘制接口](#6-绘制接口)
 - [7. 字体接口](#7-字体接口)
 - [8. 计时接口](#8-计时接口)
-- [9. 按键接口](#9-按键接口)
+- [9. 输入（不属于 HAL）](#9-输入不属于-hal)
 - [10. 外设与杂项](#10-外设与杂项)
 - [11. 默认实现](#11-默认实现)
 - [12. 编写一个后端](#12-编写一个后端)
@@ -53,7 +58,6 @@ C 没有虚函数，所以用一个**函数指针表 + 单例**来模拟多态�
            │  │ hal                 │     │
            │  │  ops ───────────┐   │     │
            │  │  config         │   │     │
-           │  │  key[2]         │   │     │
            │  │  heap_owned     │   │     │
            │  └─────────────────┼───┘     │
            └────────────────────┼─────────┘
@@ -286,12 +290,6 @@ struct hal_ops {
   void (*screen_on)(hal *self);
   void (*screen_off)(hal *self);
 
-  /* --- 按键 --- */
-  bool (*get_key)(hal *self, astra_key_index index);
-  bool (*get_any_key)(hal *self);
-  void (*key_scan)(hal *self);
-  void (*key_test)(hal *self);
-
   /* --- 杂项 --- */
   void (*print_info)(hal *self, const char *msg);
   void (*update_config)(hal *self);
@@ -304,7 +302,6 @@ struct hal_ops {
 struct hal {
   const hal_ops  *ops;                      /* 必须第一个成员 */
   astra_sys_config config;                  /* 屏幕参数       */
-  astra_key_action key[ASTRA_KEY_NUM];      /* 扫描器输出     */
   bool heap_owned;                          /* 见 §3.2        */
 };
 ```
@@ -312,7 +309,7 @@ struct hal {
 `config` 由 `hal_construct()` 填成 `astra_sys_config_default()`
 （128×64），可通过 `hal_system_config()` 读写。
 
-`key[]` 是默认按键扫描器的输出，应用通常不直接读它，而是读 `hal_get_key()`。
+结构体里**没有按键状态**：输入不属于 HAL，见第 9 章。
 
 ---
 
@@ -348,7 +345,7 @@ void hal_construct_owned(hal *h, const hal_ops *ops);  /* 堆实例，destroy �
 | `static hal_mine s_hal;` | `hal_construct` | 静态存储不能 `free()` |
 | `calloc(1, sizeof)` | `hal_construct_owned` | 需要释放 |
 
-两者都会：清零结构体 → 设 `ops` → 填默认 `config` → 按键状态置 `RELEASE`。
+两者都会：清零结构体 → 设 `ops` → 填默认 `config`。
 
 ### 3.3 `hal_destroy()` 的三步顺序
 
@@ -581,81 +578,94 @@ unsigned long hal_get_random_seed(void);    /* 真随机种子，无法提供可
 
 - `hal_delay()` 必须是**真阻塞**。框架的动画与弹窗用它控制节奏
   （`fade_animation_speed`、`pop_speed` 等以毫秒为单位的参数）。
-- `hal_millis()` 用于按键长按判定，允许回绕（用无符号减法即可正确比较）。
+- `hal_millis()` 是本框架里唯一的时间来源，长按判定、弹窗停留都由它驱动，
+  允许回绕（用无符号减法即可正确比较）。
 - `hal_get_random_seed()` 会被 Logo 星星的 `srand()` 使用。
   若平台没有 RNG，返回 `hal_millis() * 1000` 之类的值也比 0 好——
   返回固定值会让每次开机星星位置都一样。
 
 ---
 
-## 9. 按键接口
+## 9. 输入（不属于 HAL）
 
-框架只认识**两个逻辑键**：
+**HAL 里没有按键接口**，这是刻意的设计决定。
 
-```c
-typedef enum astra_key_index { ASTRA_KEY_0 = 0, ASTRA_KEY_1, ASTRA_KEY_NUM } astra_key_index;
-```
+上游 astra UI 把按键扫描放进 HAL，是因为它的目标是 Arduino 上"两个按钮 +
+一块 OLED"这一种硬件。但这种抽象在实际项目里几乎总要被绕开：
 
-语义完全由应用决定。示例应用的约定是：
+| 真实硬件 | HAL 抽象会怎样失效 |
+|---|---|
+| 5 向摇杆 | 只有两个逻辑键，另一个轴无处安放 |
+| 矩阵键盘 | 需要行扫描 + 消抖周期，与"电平查询"模型不匹配 |
+| 旋转编码器 | 本质是事件（CW/CCW/按下），不是电平 |
+| 触摸屏 | 命中测试、手势、长按阈值都在触摸驱动里，不在屏幕驱动里 |
+| 只有一个按钮 | 长按/双击/三击全靠应用状态机 |
 
-| 逻辑键 | 物理键（raylib） | 短按 | 长按 |
-|---|---|---|---|
-| `ASTRA_KEY_0` | ← ↑ A | 上一项 | 返回 |
-| `ASTRA_KEY_1` | → ↓ D | 下一项 | 进入 |
+所以 astra 只提供**机械上必须通用的部分**：菜单、选择框、相机、动画和绘制。
+输入由应用自己实现，示例见 `demo/astra_demo.c`。
 
-### 8.1 必须实现
+### 9.1 示例应用的输入层
 
-```c
-bool (*get_key)(hal *self, astra_key_index index);  /* 当前是否按住 */
-```
-
-**电平语义**：按住返回 `true`，松开返回 `false`。不需要自己消抖、
-也不需要产生边沿事件——`hal_default_key_scan()` 会做。
-
-### 8.2 可选实现
+`demo/astra_demo.h` 定义了两个逻辑键和注入入口：
 
 ```c
-bool (*get_any_key)(hal *self);   /* 任意键按住；留空则自动遍历 get_key */
-void (*key_scan)(hal *self);      /* 消抖状态机；留空用默认实现          */
-void (*key_test)(hal *self);      /* 调试用                              */
+typedef enum astra_demo_key {
+  ASTRA_DEMO_KEY_PREV = 0,   /* 短按：上移一项；长按：返回上级 */
+  ASTRA_DEMO_KEY_NEXT,       /* 短按：下移一项；长按：进入下级 */
+  ASTRA_DEMO_KEY_NUM
+} astra_demo_key;
+
+void astra_demo_key_set(astra_demo_key key, bool down);   /* 电平语义 */
 ```
 
-### 8.3 默认扫描器
-
-`hal_default_key_scan()` 是一个 5 ms 周期的状态机：
-
-```
-CHECKING ──按下──▶ KEY_x_CONFIRM ──松开──▶ RELEASED ──全松──▶ CHECKING
-                        │
-                        └──持续 100 次（约 1 s）──▶ PRESS
-```
-
-输出写到 `self->key[0..1]`（`ASTRA_KEY_CLICK` / `ASTRA_KEY_PRESS` / `ASTRA_KEY_RELEASE`）。
-
-**它不读真正的“时间”**，而是按调用次数计数，所以必须在固定周期调用
-（主循环里每帧一次，配 `SetTargetFPS(60)` 时约 16 ms 一次，
-则长按阈值实际约 1.6 s）。如需精确的长按时间，请在自己的应用层用
-`hal_millis()` 实现（示例应用就是这么做的）。
-
-### 8.4 有中断时
-
-如果平台能在中断里消抖并给出事件，可以不用默认扫描器：
+外壳每帧把平台输入翻译成这两个电平：
 
 ```c
-static bool s_pressed[ASTRA_KEY_NUM];
+/* raylib */
+astra_demo_key_set(ASTRA_DEMO_KEY_PREV,
+                   IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_UP));
+astra_demo_key_set(ASTRA_DEMO_KEY_NEXT,
+                   IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_DOWN));
 
-void EXTI_IRQHandler(void) {          /* 平台代码 */
-  s_pressed[ASTRA_KEY_1] = read_pin();
+/* GPIO */
+astra_demo_key_set(ASTRA_DEMO_KEY_PREV, HAL_GPIO_ReadPin(...) == RESET);
+astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, HAL_GPIO_ReadPin(...) == RESET);
+```
+
+示例应用内部做边沿检测和长按判定（`LONG_PRESS_MS = 500`，用 `hal_millis()`
+计时），并在**松开**时结算：
+
+```
+按下 ──记录时刻──▶ 持续按住 ──▶ 松开
+                                  ├─ 时长 < 500 ms  → 短按：移动高亮项
+                                  └─ 时长 ≥ 500 ms  → 长按：进入 / 返回
+```
+
+需要独立的"确认/返回"物理键时，直接调用 `astra_demo_activate()` /
+`astra_demo_back()`，跳过时长判定。
+
+### 9.2 自己写输入层
+
+不用示例应用时，输入层要做的只有一件事：**把用户意图翻译成对框架的调用**。
+
+```c
+switch (event) {
+  case EV_UP:       astra_selector_go(&sel, prev_index);  break;
+  case EV_DOWN:     astra_selector_go(&sel, next_index);  break;
+  case EV_ENTER:    astra_launcher_open(&launcher);       break;
+  case EV_BACK:     astra_launcher_close(&launcher);      break;
 }
-
-static bool my_get_key(hal *self, astra_key_index i) { return s_pressed[i]; }
 ```
+
+框架不关心事件从哪来、有没有消抖、是电平还是队列——`astra_selector_go()`
+和 `astra_launcher_open/close()` 都是幂等的普通函数调用，可以随时从任何地方触发
+（包括中断里置标志、主循环里消费）。
 
 ---
 
 ## 10. 外设与杂项
 
-### 9.1 蜂鸣器
+### 10.1 蜂鸣器
 
 ```c
 void hal_beep(float freq);        /* 指定频率发声 */
@@ -665,7 +675,7 @@ void hal_set_beep_vol(uint8_t vol);
 
 框架自身不发声，留给应用。没有蜂鸣器时可以不实现（默认 no-op）。
 
-### 9.2 屏幕开关
+### 10.2 屏幕开关
 
 ```c
 void hal_screen_on(void);
@@ -674,7 +684,7 @@ void hal_screen_off(void);
 
 用于息屏。桌面后端的实现是让 `canvas_update()` 输出全黑而不销毁纹理。
 
-### 9.3 日志
+### 10.3 日志
 
 ```c
 void hal_print_info(const char *msg);
@@ -684,7 +694,7 @@ void hal_print_info(const char *msg);
 用于"开机自检"这类场景。**它自己完成 clear + 绘制 + update**，
 因此是阻塞的，不要在渲染循环里调用。
 
-### 9.4 配置热更新
+### 10.4 配置热更新
 
 ```c
 void hal_update_config(void);
@@ -826,7 +836,7 @@ static void mine_draw_english(hal *self, float x, float y, const char *text) {
 
 中文需要 UTF-8 解码 + 字模表（或用 u8g2 的 `u8g2_DrawUTF8`）。
 
-### 步骤 5：实现计时与按键
+### 步骤 5：实现计时
 
 ```c
 static void mine_delay(hal *self, unsigned long ms) { (void) self; HAL_Delay(ms); }
@@ -834,11 +844,6 @@ static unsigned long mine_millis(hal *self) { (void) self; return HAL_GetTick();
 static unsigned long mine_seed(hal *self) {
   (void) self;
   return HAL_GetTick() ^ (ADC_Read() << 8);
-}
-static bool mine_get_key(hal *self, astra_key_index i) {
-  (void) self;
-  static const uint16_t PIN[2] = { KEY0_PIN, KEY1_PIN };
-  return HAL_GPIO_ReadPin(KEY_PORT, PIN[i]) == GPIO_PIN_RESET;  /* 低电平按下 */
 }
 ```
 
@@ -877,7 +882,6 @@ hal *hal_mine_create(void) {
     s_ops.millis = mine_millis;
     s_ops.get_tick = mine_millis;
     s_ops.get_random_seed = mine_seed;
-    s_ops.get_key = mine_get_key;
     s_ready = true;
   }
 
@@ -1087,11 +1091,6 @@ static void ss_delay(hal *self, unsigned long ms) { (void) self; HAL_Delay(ms); 
 static unsigned long ss_millis(hal *self) { (void) self; return HAL_GetTick(); }
 static unsigned long ss_seed(hal *self) { (void) self; return HAL_GetTick(); }
 
-static bool ss_get_key(hal *self, astra_key_index i) {
-  (void) self;
-  return i == ASTRA_KEY_0 ? key0_pressed() : key1_pressed();
-}
-
 static void ss_screen_on(hal *self)  { ((hal_ssd1306 *) self)->display_on = true;  }
 static void ss_screen_off(hal *self) { ((hal_ssd1306 *) self)->display_on = false; }
 
@@ -1132,7 +1131,6 @@ hal *hal_ssd1306_create(void) {
     s_ops.millis                   = ss_millis;
     s_ops.get_tick                 = ss_millis;
     s_ops.get_random_seed          = ss_seed;
-    s_ops.get_key                  = ss_get_key;
     s_ops.screen_on                = ss_screen_on;
     s_ops.screen_off               = ss_screen_off;
     s_ready = true;
@@ -1154,9 +1152,10 @@ astra_menu *root = astra_menu_create("root");
 /* ... */
 astra_launcher_init(&launcher, root, &selector, &camera);
 
+/* 按键不经过 HAL：自己扫描，自己决定语义 */
 for (;;) {
-  if (tick_5ms_elapsed()) hal_key_scan();
-  handle_keys();
+  if (btn_prev_pressed()) astra_launcher_close(&launcher);
+  if (btn_next_pressed()) astra_launcher_open(&launcher);
   astra_launcher_update(&launcher);
 }
 ```
@@ -1223,19 +1222,23 @@ int w = hal_vbuf_width();
 int h = hal_vbuf_height();
 ```
 
-### 14.4 输入与时间
+### 14.4 时间与输入
 
-后端没有按键 GPIO，也没有定时器，两者都由宿主注入：
+后端没有定时器，时间由宿主注入：
 
 ```c
-hal_vbuf_set_key(ASTRA_KEY_1, true);   /* 按下 */
-hal_vbuf_set_key(ASTRA_KEY_1, false);  /* 松开 */
-
 hal_vbuf_advance(16);                  /* 每帧推进 16 ms 虚拟时钟 */
 ```
 
 `delay_ms()` 在这里**不阻塞**，只推进虚拟时钟，所以 headless 跑 N 帧是瞬时的。
 真实节奏由 `hal_vbuf_advance()` 的调用频率决定。
+
+输入**不经过 HAL**（第 9 章）：直接用应用自己的输入层即可。
+
+```c
+astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, true);   /* 按下 */
+astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, false);  /* 松开 */
+```
 
 ### 14.5 静态存储（MCU）
 
@@ -1282,12 +1285,12 @@ hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
 | `canvas_update` | 调用 flush 回调 | 把缓冲区发到面板 |
 | `delay_ms` | 推进虚拟时钟 | 真阻塞 |
 | `millis` | 虚拟时钟 | 硬件 tick |
-| 按键 | 宿主注入 | 扫描 GPIO/矩阵 |
+| 按键 | 与应用层无关 | 与应用层无关（两者都不在 HAL 里） |
 | 字体 | 内置 6×12 点阵 | 由你决定（TTF 栅格化、字库芯片…） |
 | 内存 | 画布 1 KiB（128×64） | 通常还要一份面板镜像 |
 
-自测：`tests/test_vbuf.c` 覆盖 15 项，包括页布局、三种绘制模式、裁剪、
-刷新回调、按键注入、虚拟时钟、静态存储与销毁顺序。
+自测：`tests/test_vbuf.c` 覆盖 14 项，包括页布局、三种绘制模式、裁剪、
+刷新回调、虚拟时钟、静态存储与销毁顺序。
 
 ---
 
@@ -1377,9 +1380,9 @@ hal_inject(&f.base);
 - [ ] `draw_bmp` 遵循 MSB 在左、1 = 点亮
 - [ ] `get_font_width` 返回真实像素宽度（不能恒为 0）
 - [ ] `delay_ms` 真阻塞；`millis` 单调递增（允许回绕）
-- [ ] `get_key` 用**电平**语义
 - [ ] `deinit` 与 `init` 对称，能处理部分初始化
 - [ ] 静态实例用 `hal_construct`，堆实例用 `hal_construct_owned`
+- [ ] 没有往 `hal_ops` 里塞按键/输入（输入属于应用层）
 
 **建议**
 

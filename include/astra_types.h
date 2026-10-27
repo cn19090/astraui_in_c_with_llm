@@ -94,24 +94,4 @@ typedef struct astra_config {
   const uint8_t *main_font;
 } astra_config;
 
-/* Replaces key::KEY_FILTER / key::KEY_ACTION / key::KEY_INDEX. */
-typedef enum astra_key_filter {
-  ASTRA_KEY_CHECKING = 0,
-  ASTRA_KEY_0_CONFIRM,
-  ASTRA_KEY_1_CONFIRM,
-  ASTRA_KEY_RELEASED,
-} astra_key_filter;
-
-typedef enum astra_key_action {
-  ASTRA_KEY_RELEASE = 0,
-  ASTRA_KEY_CLICK,
-  ASTRA_KEY_PRESS,
-} astra_key_action;
-
-typedef enum astra_key_index {
-  ASTRA_KEY_0 = 0,
-  ASTRA_KEY_1,
-  ASTRA_KEY_NUM,
-} astra_key_index;
-
 #endif /* ASTRA_TYPES_H_ */

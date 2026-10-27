@@ -534,13 +534,6 @@ static void vbuf_screen_off(hal *self) {
   if (v->buffer != NULL) memset(v->buffer, 0, v->buffer_bytes);
 }
 
-/* The key levels a host injected; no debounce, the host owns timing. */
-static bool vbuf_get_key(hal *self, astra_key_index index) {
-  hal_vbuf *v = (hal_vbuf *) self;
-  if (index < 0 || index >= ASTRA_KEY_NUM) return false;
-  return v->base.key[index] != ASTRA_KEY_RELEASE;
-}
-
 static void vbuf_print_info(hal *self, const char *msg) {
   (void) self;
   if (msg != NULL) printf("[astra/vbuf] %s\n", msg);
@@ -591,11 +584,6 @@ static const hal_ops vbuf_ops = {
     .set_beep_vol = vbuf_set_beep_vol,
     .screen_on = vbuf_screen_on,
     .screen_off = vbuf_screen_off,
-
-    .get_key = vbuf_get_key,
-    .get_any_key = hal_default_get_any_key,
-    .key_scan = hal_default_key_scan,
-    .key_test = hal_default_key_test,
 
     .print_info = vbuf_print_info,
     .update_config = vbuf_update_config,
@@ -711,13 +699,6 @@ void hal_vbuf_set_flush(hal_vbuf_flush_fn fn, void *user) {
   if (v == NULL) return;
   v->flush = fn;
   v->flush_user = user;
-}
-
-void hal_vbuf_set_key(astra_key_index index, bool down) {
-  hal_vbuf *v = current();
-  if (v == NULL) return;
-  if (index < 0 || index >= ASTRA_KEY_NUM) return;
-  v->base.key[index] = down ? ASTRA_KEY_PRESS : ASTRA_KEY_RELEASE;
 }
 
 void hal_vbuf_advance(unsigned long ms) {

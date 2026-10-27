@@ -101,11 +101,6 @@ static void default_beep(hal *self, float freq) {
   (void) self;
   (void) freq;
 }
-static bool default_false_key(hal *self, astra_key_index index) {
-  (void) self;
-  (void) index;
-  return false;
-}
 static void default_beep_vol(hal *self, uint8_t vol) {
   (void) self;
   (void) vol;
@@ -137,90 +132,6 @@ void hal_default_print_info(hal *self, const char *msg) {
                             s_cache[i]);
   self->ops->canvas_update(self);
   self->ops->set_draw_type(self, 1); /* back to solid */
-}
-
-bool hal_default_get_any_key(hal *self) {
-  for (int i = 0; i < ASTRA_KEY_NUM; ++i)
-    if (self->ops->get_key(self, (astra_key_index) i)) return true;
-  return false;
-}
-
-/**
- * @brief Default key scanner, called every ~5 ms by the main loop.
- *
- * Debounces both keys and emits ASTRA_KEY_CLICK on release or ASTRA_KEY_PRESS
- * after a ~1 s hold.
- */
-void hal_default_key_scan(hal *self) {
-  static uint8_t s_time_cnt = 0;
-  static bool s_lock = false;
-  static astra_key_filter s_filter = ASTRA_KEY_CHECKING;
-
-  switch (s_filter) {
-    case ASTRA_KEY_CHECKING:
-      if (self->ops->get_any_key(self)) {
-        if (self->ops->get_key(self, ASTRA_KEY_0)) s_filter = ASTRA_KEY_0_CONFIRM;
-        if (self->ops->get_key(self, ASTRA_KEY_1)) s_filter = ASTRA_KEY_1_CONFIRM;
-      }
-      s_time_cnt = 0;
-      s_lock = false;
-      break;
-
-    case ASTRA_KEY_0_CONFIRM:
-    case ASTRA_KEY_1_CONFIRM:
-      if (self->ops->get_any_key(self)) {
-        if (!s_lock) s_lock = true;
-        s_time_cnt++;
-
-        if (s_time_cnt > 100) { /* long press ~1 s */
-          if (self->ops->get_key(self, ASTRA_KEY_0)) {
-            self->key[ASTRA_KEY_0] = ASTRA_KEY_PRESS;
-            self->key[ASTRA_KEY_1] = ASTRA_KEY_RELEASE;
-          }
-          if (self->ops->get_key(self, ASTRA_KEY_1)) {
-            self->key[ASTRA_KEY_1] = ASTRA_KEY_PRESS;
-            self->key[ASTRA_KEY_0] = ASTRA_KEY_RELEASE;
-          }
-          s_time_cnt = 0;
-          s_lock = false;
-          s_filter = ASTRA_KEY_RELEASED;
-        }
-      } else if (s_lock) {
-        if (s_filter == ASTRA_KEY_0_CONFIRM) {
-          self->key[ASTRA_KEY_0] = ASTRA_KEY_CLICK;
-          self->key[ASTRA_KEY_1] = ASTRA_KEY_RELEASE;
-        } else {
-          self->key[ASTRA_KEY_1] = ASTRA_KEY_CLICK;
-          self->key[ASTRA_KEY_0] = ASTRA_KEY_RELEASE;
-        }
-        s_filter = ASTRA_KEY_RELEASED;
-      } else {
-        s_filter = ASTRA_KEY_CHECKING;
-        self->key[ASTRA_KEY_0] = ASTRA_KEY_RELEASE;
-        self->key[ASTRA_KEY_1] = ASTRA_KEY_RELEASE;
-      }
-      break;
-
-    case ASTRA_KEY_RELEASED:
-      if (!self->ops->get_any_key(self)) s_filter = ASTRA_KEY_CHECKING;
-      break;
-
-    default:
-      break;
-  }
-}
-
-void hal_default_key_test(hal *self) {
-  if (!self->ops->get_any_key(self)) return;
-
-  for (uint8_t i = 0; i < ASTRA_KEY_NUM; ++i) {
-    if (self->key[i] == ASTRA_KEY_CLICK) {
-      /* hook: click of key i */
-    } else if (self->key[i] == ASTRA_KEY_PRESS) {
-      /* hook: long press of key i */
-    }
-  }
-  memset(self->key, ASTRA_KEY_RELEASE, sizeof(self->key));
 }
 
 const hal_ops astra_hal_default_ops = {
@@ -263,11 +174,6 @@ const hal_ops astra_hal_default_ops = {
     .screen_on = default_void,
     .screen_off = default_void,
 
-    .get_key = default_false_key,
-    .get_any_key = hal_default_get_any_key,
-    .key_scan = hal_default_key_scan,
-    .key_test = hal_default_key_test,
-
     .print_info = hal_default_print_info,
     .update_config = default_void,
 };
@@ -282,8 +188,6 @@ static void hal_construct_impl(hal *h, const hal_ops *ops, bool owned) {
   memset(h, 0, sizeof(*h));
   h->ops = ops == NULL ? &astra_hal_default_ops : ops;
   h->config = astra_sys_config_default();
-  h->key[ASTRA_KEY_0] = ASTRA_KEY_RELEASE;
-  h->key[ASTRA_KEY_1] = ASTRA_KEY_RELEASE;
   h->heap_owned = owned;
 }
 

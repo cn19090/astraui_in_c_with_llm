@@ -2,9 +2,8 @@
 // astra - memory-only backend self-test.
 //
 // Covers the parts of hal_vbuf that a host depends on: canvas geometry, the
-// 1bpp page layout, drawing primitives, the flush hook, key injection, the
-// virtual clock, static storage and teardown. Runs headless, links no
-// graphics library.
+// 1bpp page layout, drawing primitives, the flush hook, the virtual clock,
+// static storage and teardown. Runs headless, links no graphics library.
 //
 // Build: cmake -S Inc/astra -B Inc/astra/build    (standalone)
 //        cmake -S . -B build -DASTRA_BUILD_TESTS=ON   (from the repo root)
@@ -264,7 +263,7 @@ static void test_text(void) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* flush hook, keys, clock                                                   */
+/* flush hook, clock                                                         */
 /* ------------------------------------------------------------------------ */
 
 static void test_flush_hook(void) {
@@ -292,31 +291,6 @@ static void test_flush_hook(void) {
 
   hal_destroy();
   printf("ok  canvas_update hands the frame to the flush hook\n");
-}
-
-static void test_keys(void) {
-  hal_inject(hal_vbuf_create(NULL));
-
-  CHECK(!hal_get_key(ASTRA_KEY_0));
-  CHECK(!hal_get_key(ASTRA_KEY_1));
-  CHECK(!hal_get_any_key());
-
-  hal_vbuf_set_key(ASTRA_KEY_0, true);
-  CHECK(hal_get_key(ASTRA_KEY_0));
-  CHECK(hal_get_any_key());
-
-  hal_vbuf_set_key(ASTRA_KEY_1, true);
-  CHECK(hal_get_key(ASTRA_KEY_1));
-
-  hal_vbuf_set_key(ASTRA_KEY_0, false);
-  CHECK(!hal_get_key(ASTRA_KEY_0));
-  CHECK(hal_get_key(ASTRA_KEY_1));
-
-  hal_vbuf_set_key(ASTRA_KEY_1, false);
-  CHECK(!hal_get_any_key());
-
-  hal_destroy();
-  printf("ok  key levels injected by the host are visible to the framework\n");
 }
 
 static void test_clock(void) {
@@ -418,7 +392,6 @@ static void test_host_api_without_backend(void) {
   CHECK(hal_vbuf_width() == 0);
   CHECK(hal_vbuf_height() == 0);
   hal_vbuf_set_flush(probe_flush, NULL);
-  hal_vbuf_set_key(ASTRA_KEY_0, true);
   hal_vbuf_advance(10);
 
   printf("ok  host API is inert when no vbuf backend is injected\n");
@@ -440,7 +413,6 @@ int main(void) {
   test_primitives();
   test_text();
   test_flush_hook();
-  test_keys();
   test_clock();
   test_screen_off();
   test_static_storage();

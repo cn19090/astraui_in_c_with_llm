@@ -42,7 +42,7 @@
 
 | 头文件 | 位置 | 说明 |
 |---|---|---|
-| `astra_demo.h` | `demo/` | 示例应用：菜单树 + 按键策略，只依赖 HAL |
+| `astra_demo.h` | `demo/` | 示例应用：菜单树 + 输入层，只依赖 HAL |
 | `hal_raylib.h` | 外层演示工程的 `port/raylib/` | raylib 后端，唯一引用 raylib 的框架消费者 |
 
 典型包含：
@@ -89,16 +89,13 @@ typedef struct astra_sys_config {
 
 ```c
 typedef enum astra_page_type { ASTRA_PAGE_TILE = 0, ASTRA_PAGE_LIST } astra_page_type;
-
-typedef enum astra_key_index  { ASTRA_KEY_0 = 0, ASTRA_KEY_1, ASTRA_KEY_NUM } astra_key_index;
-typedef enum astra_key_action { ASTRA_KEY_RELEASE = 0, ASTRA_KEY_CLICK, ASTRA_KEY_PRESS } astra_key_action;
-typedef enum astra_key_filter { ASTRA_KEY_CHECKING = 0, ASTRA_KEY_0_CONFIRM,
-                                ASTRA_KEY_1_CONFIRM, ASTRA_KEY_RELEASED } astra_key_filter;
 ```
 
 - `ASTRA_PAGE_TILE`：图标横排 + 横向滚动
 - `ASTRA_PAGE_LIST`：文字竖排 + 纵向滚动
-- `ASTRA_KEY_0` / `ASTRA_KEY_1`：两个物理键（无编码差别，语义由应用决定）
+
+框架**不定义任何按键枚举**：输入不属于 HAL，由应用自己建模
+（示例应用用的是 `astra_demo_key`，见第 10 章）。
 
 ### 2.4 容量宏
 
@@ -554,14 +551,16 @@ void astra_draw_logo(uint16_t time_frames);
 ## 10. 示例应用层（`demo/astra_demo`）
 
 `demo/astra_demo.h` / `.c` 是一个完整但可替换的示例：4 个磁贴页 + 各自列表子页 +
-按键状态机。它**只依赖 HAL**，不含任何平台代码，可以直接搬到别的后端上。
+输入层（两个逻辑键 + 短按/长按判定）。它**只依赖 HAL**，不含任何平台代码，
+可以直接搬到别的后端上。
 
 ```c
 bool astra_demo_init(const uint8_t *main_font,        /* 播动画 + 建菜单树 */
                      const uint8_t *logo_title_font,
                      const uint8_t *logo_copy_right_font);
-void astra_demo_update(void);                  /* 每帧：按键 + 渲染 */
+void astra_demo_update(void);                  /* 每帧：采样输入 + 渲染 */
 void astra_demo_destroy(void);                 /* 只回收页面池      */
+void astra_demo_key_set(astra_demo_key key, bool down);  /* 输入注入  */
 void astra_demo_activate(void);                /* 进入选中项（可选）*/
 void astra_demo_back(void);                    /* 返回上级（可选）  */
 ```
@@ -601,20 +600,41 @@ astra_demo_init(&hal_raylib_font_main, &hal_raylib_font_logo_title,
                 &hal_raylib_font_logo_copyright);
 ```### 内置输入策略
 
-导航只用 HAL 的两个逻辑键，所以任何后端都能用：
+HAL 不提供输入（见 [hal.md](hal.md#9-输入不属于-hal)），示例应用自带这一层：
+
+```c
+typedef enum astra_demo_key {
+  ASTRA_DEMO_KEY_PREV = 0,   /* 短按：上一项；长按：返回上级 */
+  ASTRA_DEMO_KEY_NEXT,       /* 短按：下一项；长按：进入下级 */
+  ASTRA_DEMO_KEY_NUM
+} astra_demo_key;
+
+void astra_demo_key_set(astra_demo_key key, bool down);   /* 电平语义 */
+```
+
+外壳每帧把平台输入翻译成两个电平，示例应用负责边沿检测与长按判定：
 
 | 事件 | 动作 |
 |---|---|
-| `ASTRA_KEY_0` 短按 | 上一项 |
-| `ASTRA_KEY_1` 短按 | 下一项 |
-| `ASTRA_KEY_0` 长按（0.5 s） | 返回上级 |
-| `ASTRA_KEY_1` 长按（0.5 s） | 进入选中项 |
+| `ASTRA_DEMO_KEY_PREV` 短按 | 上一项 |
+| `ASTRA_DEMO_KEY_NEXT` 短按 | 下一项 |
+| `ASTRA_DEMO_KEY_PREV` 长按（0.5 s） | 返回上级 |
+| `ASTRA_DEMO_KEY_NEXT` 长按（0.5 s） | 进入选中项 |
+
+长按阈值 `LONG_PRESS_MS = 500`，用 `hal_millis()` 计时，在**松开**时结算。
+
+```c
+/* 外壳一侧（raylib） */
+astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, IsKeyDown(KEY_RIGHT));
+astra_demo_update();
+```
 
 `astra_demo_activate()` / `astra_demo_back()` 是给 shell 准备的额外入口，
-用于有独立确认/返回键的平台（示例 `main.c` 把它们绑到 `Enter` / `Backspace`）。
+绕过时长判定，用于有独立确认/返回键的平台
+（示例 `main.c` 把它们绑到 `Enter` / `Backspace`）。
 
 **如果你在写自己的应用，不要调用 `astra_demo_*`** —— 直接使用
-`hal_*` / `astra_menu_*` / `astra_launcher_*`，自己实现 `handle_keys()`。
+`astra_menu_*` / `astra_launcher_*`，自己实现输入。
 `demo/astra_demo.c` 可直接作为参考实现。
 
 ---
@@ -664,7 +684,7 @@ int main(void) {
 
     /* 5. 主循环 */
     while (!WindowShouldClose()) {
-        handle_keys();           /* 你自己的输入策略 */
+        read_buttons_and_dispatch();  /* 你自己的输入策略 */
         astra_launcher_update(&launcher);
     }
 

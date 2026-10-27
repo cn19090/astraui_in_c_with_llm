@@ -78,12 +78,6 @@ struct hal_ops {
   void (*screen_on)(hal *self);
   void (*screen_off)(hal *self);
 
-  /* --- keys --- */
-  bool (*get_key)(hal *self, astra_key_index index);
-  bool (*get_any_key)(hal *self);
-  void (*key_scan)(hal *self);
-  void (*key_test)(hal *self);
-
   /* --- misc --- */
   void (*print_info)(hal *self, const char *msg);
   void (*update_config)(hal *self);
@@ -92,7 +86,6 @@ struct hal_ops {
 struct hal {
   const hal_ops *ops;                  /* must stay the first member */
   astra_sys_config config;
-  astra_key_action key[ASTRA_KEY_NUM];
   bool heap_owned;                     /* true => hal_destroy() calls free() */
 };
 
@@ -105,7 +98,7 @@ hal *hal_get(void);
 bool hal_check(void);
 void hal_destroy(void);
 
-/* Backend constructor: sets ops, default system config and key state.
+/* Backend constructor: sets ops and the default system config.
    Must be called before hal_inject() (typically from <backend>_create()).
 
    Ownership: hal_destroy() only releases the instance when it was registered
@@ -117,11 +110,8 @@ void hal_construct(hal *h, const hal_ops *ops);
    so hal_destroy() will free() it. */
 void hal_construct_owned(hal *h, const hal_ops *ops);
 
-/* Default implementations that backends may reuse (logging, key scanning). */
+/* Default logging implementation that backends may reuse. */
 void hal_default_print_info(hal *self, const char *msg);
-bool hal_default_get_any_key(hal *self);
-void hal_default_key_scan(hal *self);
-void hal_default_key_test(hal *self);
 
 /* ------------------------------------------------------------------------ */
 /* Static-forwarding API. All inline, so each call compiles to a single      */
@@ -254,23 +244,6 @@ static inline void hal_screen_on(void) {
 static inline void hal_screen_off(void) {
   hal *h = hal_get();
   h->ops->screen_off(h);
-}
-
-static inline bool hal_get_key(astra_key_index index) {
-  hal *h = hal_get();
-  return h->ops->get_key(h, index);
-}
-static inline bool hal_get_any_key(void) {
-  hal *h = hal_get();
-  return h->ops->get_any_key(h);
-}
-static inline void hal_key_scan(void) {
-  hal *h = hal_get();
-  h->ops->key_scan(h);
-}
-static inline void hal_key_test(void) {
-  hal *h = hal_get();
-  h->ops->key_test(h);
 }
 
 static inline void hal_print_info(const char *msg) {

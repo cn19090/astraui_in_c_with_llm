@@ -9,21 +9,22 @@
 > 同一套 API 语义，把 C++ 的类继承与虚函数改写为 C 的函数指针表（`hal_ops`）与扁平化
 > 结构体，并把显示分辨率从编译期常量改为运行期数据。上游的许可与致谢同样适用于本工程。
 
-框架本身**不含一行平台代码**：所有绘制、计时、按键都经一张可替换的函数指针表
+框架本身**不含一行平台代码**：所有绘制与计时都经一张可替换的函数指针表
 （HAL）转发。因此同一份框架代码可以跑在 SSD1306、raylib 窗口、SDL 或纯内存
-测试桩上，无需改动任何一行。
+测试桩上，无需改动任何一行。**用户输入不在 HAL 里**——按键、旋钮、触摸由
+应用自己实现。
 
 这是一个**独立工程**：自带构建脚本、示例应用、自测和文档，可以整体拷进你的项目，
 也可以单独构建验证。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  你的应用            menu tree, 按键策略, 页面跳转        │
+│  你的应用            menu tree, 输入层, 页面跳转          │
 ├──────────────────────────────────────────────────────────┤
 │  launcher            页面调度 · 弹窗                      │
 │  item                menu / selector / camera / 动画      │
 ├──────────────────────────────────────────────────────────┤
-│  hal (ops 表)        绘制 · 计时 · 按键 · 屏幕开关         │
+│  hal (ops 表)        绘制 · 计时 · 屏幕开关               │
 ├──────────────────────────────────────────────────────────┤
 │  后端                由你实现：SSD1306 · raylib · 任意平台 │
 └──────────────────────────────────────────────────────────┘
@@ -63,7 +64,7 @@ Inc/astra/                      ← 本工程根目录
 │   └── logo.c
 ├── demo/                       示例应用（只依赖 HAL，与平台无关）
 │   ├── astra_demo.h
-│   └── astra_demo.c            4 个磁贴页 + 列表子页 + 按键策略
+│   └── astra_demo.c            4 个磁贴页 + 列表子页 + 输入层
 ├── docs/
 │   ├── api.md                  应用层 API 参考
 │   └── hal.md                  硬件抽象层详解与后端适配指南
@@ -100,7 +101,7 @@ Inc\astra\build\Debug\astra_test_hal.exe
 | `astra` | 框架静态库 + 内存后端（零平台依赖） |
 | `astra_demo` | 示例应用静态库，用于证明 demo 只依赖框架公开头文件 |
 | `astra_test_hal` | 框架自测，16 项，不开窗口、不链接图形库 |
-| `astra_test_vbuf` | 内存后端自测，15 项，校验画布布局、绘制、刷新回调、按键 |
+| `astra_test_vbuf` | 内存后端自测，14 项，校验画布布局、绘制、刷新回调、虚拟时钟 |
 
 也可以完全不用 CMake，把 `src/*.c` 加入你的工程、把 `include/` 加进 include 路径即可。
 
@@ -134,7 +135,7 @@ int h = hal_vbuf_height();
 
 其它要点：
 
-- 按键用 `hal_vbuf_set_key(ASTRA_KEY_0/1, true/false)` 注入
+- 按键不经过 HAL：用应用自己的输入层（示例是 `astra_demo_key_set()`）
 - 时间用 `hal_vbuf_advance(16)` 每帧推进；`hal_delay()` 不阻塞，只推进虚拟时钟
 - 静态存储（MCU 常用）：`hal_vbuf_init_static(&vbuf, &cfg, canvas, sizeof(canvas))`，
   然后 `hal_inject(&vbuf.base)`，结束时 `hal_vbuf_deinit()`（不释放你的数组）
@@ -189,7 +190,7 @@ astra_launcher_update(&launcher);   /* 清屏 → 画页面 → 画选择器 →
 参考用法：
 
 - 4 个磁贴页（System / Display / Network / About），各自带列表子页
-- 两个逻辑键：短按切换高亮项，长按进入 / 返回
+- 自带输入层：两个逻辑键，短按切换高亮项，长按进入 / 返回
 - 固定 128×64 排版，每个步骤带中文注释
 
 它只 include 框架的公开头文件，不含任何平台代码，因此可以直接搬到你的后端上。
@@ -202,11 +203,33 @@ bool astra_demo_init(const uint8_t *main_font,
                      const uint8_t *logo_copy_right_font);
 void astra_demo_update(void);     /* 一帧 */
 void astra_demo_destroy(void);    /* 只回收对象池，不碰 HAL */
+void astra_demo_key_set(astra_demo_key key, bool down);  /* 输入注入 */
 void astra_demo_activate(void);   /* 可选：进入高亮项 */
 void astra_demo_back(void);       /* 可选：返回上级   */
 ```
 
 三个字体句柄由后端定义，框架只当作不透明 ID 原样传回后端。
+
+### 输入由谁负责
+
+HAL 不提供输入，示例应用自带一层最简输入：
+
+```c
+typedef enum astra_demo_key {
+  ASTRA_DEMO_KEY_PREV = 0,   /* 短按：上一项；长按：返回上级 */
+  ASTRA_DEMO_KEY_NEXT,       /* 短按：下一项；长按：进入下级 */
+  ASTRA_DEMO_KEY_NUM
+} astra_demo_key;
+```
+
+外壳每帧把平台输入翻译成两个电平塞进来，边沿检测和长按（500 ms）由示例
+应用负责：
+
+```c
+astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, IsKeyDown(KEY_RIGHT));   /* raylib */
+astra_demo_key_set(ASTRA_DEMO_KEY_PREV, HAL_GPIO_ReadPin(...) == RESET);  /* GPIO */
+astra_demo_update();
+```
 
 ## 文档
 
@@ -270,7 +293,7 @@ astra_config_fit_to_screen(astra_ui_config(), sys->screen_weight, sys->screen_he
 
 | 决策 | 原因 |
 |---|---|
-| 框架零平台依赖 | 全部绘制/计时/按键经 HAL 转发；自测目标不链接图形库也能编译运行 |
+| 框架零平台依赖 | 全部绘制/计时经 HAL 转发；自测目标不链接图形库也能编译运行 |
 | `ops` 表模拟虚函数 | C 里没有虚函数表，函数指针结构体是等效替代 |
 | 后端结构体把 `hal base` 放第一个成员 | 依赖 C 的对象布局保证上下转型安全 |
 | 分辨率是运行期数据 | 后端画布按配置分配；框架读 `hal_system_config()` 自适应布局 |

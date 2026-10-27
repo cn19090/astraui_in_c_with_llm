@@ -38,7 +38,7 @@
 
 #include "hal.h"
 
-/* Font handles. All three map to the same built-in 8x12 ASCII table in this
+/* Font handles. All three map to the same built-in 6x12 ASCII table in this
    backend; they exist so the application can stay backend agnostic. */
 extern const uint8_t hal_vbuf_font_main;
 extern const uint8_t hal_vbuf_font_logo_title;
@@ -117,14 +117,9 @@ int hal_vbuf_height(void);
 /* Install (or clear, with NULL) the frame callback described above. */
 void hal_vbuf_set_flush(hal_vbuf_flush_fn fn, void *user);
 
-/* Inject a key level. The framework reads keys through hal_get_key(); this is
-   how a headless host feeds it. key_scan()/key_test() apply the pending
-   levels, so call them (or let the framework call them) once per frame. */
-void hal_vbuf_set_key(astra_key_index index, bool down);
-
 /* Advance the virtual clock without blocking. Call once per frame with the
-   real elapsed time if you want delays and long presses to behave. delay_ms()
-   advances the same clock, so a headless run completes instantly. */
+   real elapsed time if you want delays to behave. delay_ms() advances the same
+   clock, so a headless run completes instantly. */
 void hal_vbuf_advance(unsigned long ms);
 
 #endif /* ASTRA_HAL_VBUF_H_ */
