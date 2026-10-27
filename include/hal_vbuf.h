@@ -42,12 +42,6 @@
 
 #include "hal.h"
 
-/* Font handles. All three map to the same built-in 6x12 ASCII table in this
-   backend; they exist so the application can stay backend agnostic. */
-extern const uint8_t hal_vbuf_font_main;
-extern const uint8_t hal_vbuf_font_logo_title;
-extern const uint8_t hal_vbuf_font_logo_copyright;
-
 typedef struct hal_vbuf_config {
   int width;  /* panel width in pixels, multiple of 8; 0 => 128 */
   int height; /* panel height in pixels, multiple of 8; 0 => 64 */
@@ -77,7 +71,7 @@ typedef struct hal_vbuf {
   uint8_t draw_type;  /* 0 clear, 1 solid, 2 invert */
   bool display_on;    /* false => drawing is dropped, like a blanked panel */
 
-  const uint8_t *font; /* one of the three handles above; NULL => main */
+  astra_font_role font; /* last role requested; all roles draw the same 6x12 */
 
   hal_vbuf_flush_fn flush;
   void *flush_user;

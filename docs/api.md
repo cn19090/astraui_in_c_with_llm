@@ -225,17 +225,18 @@ if (ui->list_line_height < ui->list_text_height + ui->list_text_margin)
 | `pop_margin` / `pop_radius` | 4 / 2 |
 | `logo_star_length` / `logo_star_num` | 2 / 16 |
 | `logo_text_height` / `logo_copy_right_height` | 14 / 8 |
-| `main_font` / `logo_title_font` / `logo_copy_right_font` | `NULL`（后端决定字号） |
+
+字号不在配置里：框架只按 `astra_font_role`（`TITLE` / `BODY` / `SMALL`）请求，
+具体像素大小由后端决定。详见 [hal.md](hal.md) 第 7 章。
 
 ### 配置的生效时机
 
-`astra_menu` / `astra_selector` 各自持有一份 `astra_config` **副本**。
-副本在 `astra_menu_render()`、`astra_selector_go()`、`astra_selector_render()`
-开头刷新，因此：
+框架**不缓存配置**：每次 render / 动画步都直接读 `astra_ui_config()` 与
+`hal_system_config_or_default()`，因此：
 
-- 运行时改 `astra_ui_config()` 会在**下一帧**生效；
-- 但 `astra_menu_add_item()` 里的坐标计算使用**创建时**的配置值。
-  如果要在建完菜单后再改布局，需要重新创建页面。
+- 运行时改 `astra_ui_config()` 在**下一帧**生效，无需通知；
+- 例外是 `astra_menu_add_item()` 里的坐标：它在调用当时就把目标位置算好写进
+  `position*_trg`，改布局后需要重建页面才会重新计算。
 
 ---
 
@@ -553,8 +554,8 @@ void astra_draw_logo(uint16_t time_frames);
 - `time_frames` 的单位是**帧**：60 FPS 下 `110` ≈ 1.8 秒。
 - 阻塞，内部跑自己的帧循环。
 - 可重复调用（结束后自动复位）。
-- 依赖 `astra_ui_config()->logo_title_font / logo_copy_right_font / main_font`，
-  由后端把这三个句柄映射成实际字号。
+- 内部依次请求 `ASTRA_FONT_TITLE` / `ASTRA_FONT_SMALL` / `ASTRA_FONT_BODY`，
+  由后端把角色映射成实际字号。
 
 ---
 
@@ -565,15 +566,16 @@ void astra_draw_logo(uint16_t time_frames);
 可以直接搬到别的后端上。
 
 ```c
-bool astra_demo_init(const uint8_t *main_font,        /* 播动画 + 建菜单树 */
-                     const uint8_t *logo_title_font,
-                     const uint8_t *logo_copy_right_font);
+bool astra_demo_init(void);                    /* 播动画 + 建菜单树 */
 void astra_demo_update(void);                  /* 每帧：采样输入 + 渲染 */
 void astra_demo_destroy(void);                 /* 只回收页面池      */
 void astra_demo_key_set(astra_demo_key key, bool down);  /* 输入注入  */
 void astra_demo_activate(void);                /* 进入选中项（可选）*/
 void astra_demo_back(void);                    /* 返回上级（可选）  */
 ```
+
+`astra_demo_init()` 不收任何参数：字号由后端按 `astra_font_role` 决定，
+不需要应用在中间搬运。
 
 ### 前置条件
 
@@ -588,7 +590,7 @@ void astra_demo_back(void);                    /* 返回上级（可选）  */
 这个示例按 **128x64** 手工排版，不做分辨率适配，初始化流程固定为：
 
 1. `astra_ui_config_reset()` 回到出厂排版（避免反复 init 累积改动）
-2. 绑定后端给的三个字体句柄，并设 `logo_animation_speed = 88`
+2. 设 `logo_animation_speed = 88`
 3. 用 `hal_get_font_height()` 校正 `list_text_height`，并把
    `list_line_height` 设为 `字号 + 上边距`
 4. 建根页面 + 4 个磁贴页（图标 30x30，128x64 放得下）
@@ -601,14 +603,7 @@ astra_config_fit_to_screen(astra_ui_config(), sys->screen_weight, sys->screen_he
 
 该函数在 128x64 上是空操作（缩放系数为 1 时直接返回）。
 
-### 字体句柄
-
-三个字体参数的值由后端定义，框架把它当作不透明 ID 转回后端。raylib 后端：
-
-```c
-astra_demo_init(&hal_raylib_font_main, &hal_raylib_font_logo_title,
-                &hal_raylib_font_logo_copyright);
-```### 内置输入策略
+### 内置输入策略
 
 HAL 不提供输入（见 [hal.md](hal.md#9-输入不属于-hal)），示例应用自带这一层：
 
@@ -680,11 +675,10 @@ int main(void) {
     /* 2. 注入后端 —— 必须在任何 hal_* 调用之前 */
     hal_inject(hal_raylib_create_with(&dev));
 
-    /* 3. 绑字体句柄，并把排版适配到实际面板（可选） */
-    astra_config *cfg = astra_ui_config();
-    cfg->main_font = &hal_raylib_font_main;
-    astra_config_fit_to_screen(cfg, hal_system_config()->screen_weight,
-                                    hal_system_config()->screen_height);
+    /* 3. 把排版适配到实际面板（可选；128x64 上是空操作） */
+    astra_config_fit_to_screen(astra_ui_config(),
+                               hal_system_config()->screen_weight,
+                               hal_system_config()->screen_height);
 
     /* 4. 建菜单并启动 */
     astra_menu_pool_reset();
@@ -739,7 +733,7 @@ hal_destroy();                              /* 释放后端          */
 | 现象 | 原因 |
 |---|---|
 | 屏幕全黑 | 后端没 `hal_inject`，或 `screen_weight/height` 为 0 |
-| 文字不显示 | 字体句柄未绑定，或后端未实现 `get_font_width` |
+| 文字不显示 | 后端未实现 `get_font_width`，或 `set_font` 里漏了某个角色 |
 | 图标是实心方块 | 位图约定反了（必须是 1 = 点亮） |
 | 菜单项丢失 | `astra_menu_create()` 或 `add_item()` 返回 `NULL` / `false`，未检查 |
 | 动画瞬间到位 | `speed` 设得过大（`>= 100` 会除零） |

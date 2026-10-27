@@ -22,12 +22,9 @@ typedef enum astra_demo_key {
   ASTRA_DEMO_KEY_NUM
 } astra_demo_key;
 
-/* 在已注入后端的前提下建立菜单并播放开机动画。
-   三个字体句柄由后端定义（例如 raylib 后端的 hal_raylib_font_main），
-   框架把它们当作不透明 ID 原样传回后端，因此必须传入真实句柄。
+/* 建立菜单并播放开机动画。要求 HAL 已注入，且菜单池是干净的。
    返回 false 表示没有 HAL 或对象池已耗尽。 */
-bool astra_demo_init(const uint8_t *main_font, const uint8_t *logo_title_font,
-                     const uint8_t *logo_copy_right_font);
+bool astra_demo_init(void);
 
 /* 一帧：采样按键电平、更新导航、渲染并送出显存。必须在 init() 之后调用。 */
 void astra_demo_update(void);

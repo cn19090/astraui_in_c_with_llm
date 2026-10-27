@@ -198,9 +198,7 @@ astra_launcher_update(&launcher);   /* 清屏 → 画页面 → 画选择器 →
 接口：
 
 ```c
-bool astra_demo_init(const uint8_t *main_font,
-                     const uint8_t *logo_title_font,
-                     const uint8_t *logo_copy_right_font);
+bool astra_demo_init(void);       /* 播动画 + 建菜单树 */
 void astra_demo_update(void);     /* 一帧 */
 void astra_demo_destroy(void);    /* 只回收对象池，不碰 HAL */
 void astra_demo_key_set(astra_demo_key key, bool down);  /* 输入注入 */
@@ -208,7 +206,8 @@ void astra_demo_activate(void);   /* 可选：进入高亮项 */
 void astra_demo_back(void);       /* 可选：返回上级   */
 ```
 
-三个字体句柄由后端定义，框架只当作不透明 ID 原样传回后端。
+字号不需要应用参与：框架按 `astra_font_role`（`TITLE` / `BODY` / `SMALL`）
+向后端请求，具体像素大小由后端决定。
 
 ### 输入由谁负责
 

@@ -258,6 +258,16 @@ static void test_text(void) {
   CHECK(count_lit(buf, bytes) > 20);             /* placeholder box drawn */
   CHECK(count_lit(buf, bytes) < 80);
 
+  /* All three roles must be accepted and must not change the metrics: this
+     backend only owns one 6x12 cell, so the request is recorded and ignored. */
+  hal_set_font(ASTRA_FONT_TITLE);
+  CHECK(hal_get_font_height() == 12);
+  CHECK(hal_get_font_width("A") == 6);
+  hal_set_font(ASTRA_FONT_SMALL);
+  CHECK(hal_get_font_height() == 12);
+  hal_set_font(ASTRA_FONT_BODY);
+  CHECK(hal_get_font_height() == 12);
+
   hal_destroy();
   printf("ok  text metrics and glyph rasterisation\n");
 }

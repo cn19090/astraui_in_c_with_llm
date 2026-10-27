@@ -45,7 +45,7 @@ struct hal_ops {
   void (*canvas_clear)(hal *self);
 
   /* --- font --- */
-  void (*set_font)(hal *self, const uint8_t *font);
+  void (*set_font)(hal *self, astra_font_role role);
   uint8_t (*get_font_width)(hal *self, const char *text);
   uint8_t (*get_font_height)(hal *self);
   void (*set_draw_type)(hal *self, uint8_t type);
@@ -141,9 +141,9 @@ static inline void hal_canvas_clear(void) {
   h->ops->canvas_clear(h);
 }
 
-static inline void hal_set_font(const uint8_t *font) {
+static inline void hal_set_font(astra_font_role role) {
   hal *h = hal_get();
-  h->ops->set_font(h, font);
+  h->ops->set_font(h, role);
 }
 static inline uint8_t hal_get_font_width(const char *text) {
   hal *h = hal_get();

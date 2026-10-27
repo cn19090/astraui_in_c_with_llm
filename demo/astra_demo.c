@@ -197,9 +197,8 @@ static void handle_keys(void)
 /* 生命周期                                                                  */
 /* ------------------------------------------------------------------------ */
 
-/* 三个字体句柄由后端定义，框架只当作不透明的 ID 转交。 */
-bool astra_demo_init(const uint8_t *main_font, const uint8_t *logo_title_font,
-                     const uint8_t *logo_copy_right_font)
+/* 建立菜单并播放开机动画。 */
+bool astra_demo_init(void)
 {
   /* 步骤 1：没有注入后端就无从初始化。 */
   if (!hal_check())
@@ -209,53 +208,48 @@ bool astra_demo_init(const uint8_t *main_font, const uint8_t *logo_title_font,
   astra_ui_config_reset();
   astra_config *ui = astra_ui_config();
 
-  /* 步骤 3：绑定后端提供的三个字号句柄。 */
-  ui->main_font = main_font;
-  ui->logo_title_font = logo_title_font;
-  ui->logo_copy_right_font = logo_copy_right_font;
-
-  /* 步骤 4：开机动画速度。 */
+  /* 步骤 3：开机动画速度。 */
   ui->logo_animation_speed = LOGO_SPEED;
 
-  /* 步骤 5：行高跟随后端真实字号，否则文字会被裁掉或互相压住：
+  /* 步骤 4：行高跟随后端真实字号，否则文字会被裁掉或互相压住：
      list_text_height 是文字高度，list_line_height 是行间距（行距 >= 字高 + 边距）。 */
   ui->list_text_height = (float)hal_get_font_height();
   ui->list_line_height = ui->list_text_height + ui->list_text_margin;
 
-  /* 步骤 6：清空按键历史，避免把上一次运行残留的电平当成一次按下。 */
+  /* 步骤 5：清空按键历史，避免把上一次运行残留的电平当成一次按下。 */
   memset(s_key_down, 0, sizeof(s_key_down));
   memset(s_key_down_at, 0, sizeof(s_key_down_at));
   memset(s_key_level, 0, sizeof(s_key_level));
 
-  /* 步骤 7：先停顿 200 ms 让屏幕稳定，再播开机动画。 */
+  /* 步骤 6：先停顿 200 ms 让屏幕稳定，再播开机动画。 */
   hal_delay(200);
   astra_draw_logo(LOGO_FRAMES);
 
-  /* 步骤 8：Logo 动画会把字体切成版权字号且不还原，这里切回正文字体，
+  /* 步骤 7：Logo 动画会把字体切成版权字号且不还原，这里切回正文字体，
      否则整个菜单都会用最小的字号渲染。 */
-  hal_set_font(ui->main_font);
+  hal_set_font(ASTRA_FONT_BODY);
 
-  /* 步骤 9：清空对象池，把 32 个槽位还给下面的建树过程。 */
+  /* 步骤 8：清空对象池，把 32 个槽位还给下面的建树过程。 */
   astra_menu_pool_reset();
 
-  /* 步骤 10：建根页面。 */
+  /* 步骤 9：建根页面。 */
   s_root = astra_menu_create("root");
   if (s_root == NULL)
     return false;
 
-  /* 步骤 11：建四个磁贴页（128x64 放得下图标 + 标题）。 */
+  /* 步骤 10：建四个磁贴页（128x64 放得下图标 + 标题）。 */
   astra_menu *system_page = astra_menu_create_tile("System", PIC_SYSTEM);
   astra_menu *display_page = astra_menu_create_tile("Display", PIC_DISPLAY);
   astra_menu *network_page = astra_menu_create_tile("Network", PIC_NETWORK);
   astra_menu *about_page = astra_menu_create_tile("About", PIC_ABOUT);
 
-  /* 步骤 12：把四个磁贴挂到根页面。 */
+  /* 步骤 11：把四个磁贴挂到根页面。 */
   astra_menu_add_item(s_root, system_page);
   astra_menu_add_item(s_root, display_page);
   astra_menu_add_item(s_root, network_page);
   astra_menu_add_item(s_root, about_page);
 
-  /* 步骤 13：给每个磁贴页填子项。 */
+  /* 步骤 12：给每个磁贴页填子项。 */
   astra_menu_add_item(system_page, astra_menu_create("Brightness"));
   astra_menu_add_item(system_page, astra_menu_create("Volume"));
   astra_menu_add_item(system_page, astra_menu_create("Sleep Mode"));
@@ -273,7 +267,7 @@ bool astra_demo_init(const uint8_t *main_font, const uint8_t *logo_title_font,
   astra_menu_add_item(about_page, astra_menu_create("Version 1.0"));
   astra_menu_add_item(about_page, astra_menu_create("C99"));
 
-  /* 步骤 14：把根页面、选择器和相机交给 launcher，开始可以渲染。 */
+  /* 步骤 13：把根页面、选择器和相机交给 launcher，开始可以渲染。 */
   astra_launcher_init(&s_launcher, s_root, &s_selector, &s_camera);
   return true;
 }

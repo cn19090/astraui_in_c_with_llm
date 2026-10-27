@@ -257,7 +257,7 @@ struct hal_ops {
   void     (*canvas_clear)(hal *self);
 
   /* --- 字体 --- */
-  void    (*set_font)(hal *self, const uint8_t *font);
+  void    (*set_font)(hal *self, astra_font_role role);
   uint8_t (*get_font_width)(hal *self, const char *text);
   uint8_t (*get_font_height)(hal *self);
   void    (*set_draw_type)(hal *self, uint8_t type);
@@ -496,49 +496,55 @@ for (i = 0; i < len; ++i)
 
 ## 7. 字体接口
 
-框架对字体的认知仅限于"一个不透明句柄 + 宽高查询"：
+框架对字体的认知仅限于"选哪个角色 + 宽高查询"：
 
 ```c
-void    hal_set_font(const uint8_t *font);      /* 切换当前字体 */
+void    hal_set_font(astra_font_role role);     /* 选择字号角色 */
 uint8_t hal_get_font_width(const char *text);   /* 该串在当前字体下的像素宽 */
 uint8_t hal_get_font_height(void);              /* 当前字体的行高 */
 ```
 
-### 6.1 句柄的含义由后端定义
-
-`astra_config` 里的三个字段就是这三个句柄：
+### 6.1 三个角色
 
 ```c
-const uint8_t *main_font;              /* 正文      */
-const uint8_t *logo_title_font;        /* Logo 标题 */
-const uint8_t *logo_copy_right_font;   /* Logo 副标题 */
+typedef enum astra_font_role {
+  ASTRA_FONT_TITLE = 0,  /* Logo 主标题，最大 */
+  ASTRA_FONT_BODY,       /* 菜单正文与标题    */
+  ASTRA_FONT_SMALL,      /* Logo 副标题，最小 */
+} astra_font_role;
 ```
 
-默认都是 `NULL`。后端可以：
-
-**方式 A：用指针当"字号标签"**（桌面后端采用）
+框架只会请求这三个角色之一，**不再传递任何后端私有句柄**。之所以用枚举而不是
+不透明指针：句柄曾经要经 `astra_config` 三个字段中转（应用传给 init → 存进配置
+→ 转发回后端），整条链路上框架从不解释它们，等于把后端的数据结构塞进框架的
+配置里。现在语义在框架侧定义，映射方式在后端侧决定：
 
 ```c
-extern const uint8_t hal_raylib_font_main;        /* 值为 1 */
-extern const uint8_t hal_raylib_font_logo_title;  /* 值为 2 */
-
-static void rl_set_font(hal *self, const uint8_t *font) {
+/* 桌面后端：角色 → TTF 栅格化字号 */
+static void rl_set_font(hal *self, astra_font_role role) {
   hal_raylib *r = (hal_raylib *) self;
-  if (font == &hal_raylib_font_logo_title) r->font_pixel_size = 14;
-  else if (font == &hal_raylib_font_logo_copyright) r->font_pixel_size = 8;
-  else r->font_pixel_size = 12;
+  switch (role) {
+    case ASTRA_FONT_TITLE: r->font_pixel_size = r->font_pixel_logo_title; break;
+    case ASTRA_FONT_SMALL: r->font_pixel_size = r->font_pixel_logo_copyright; break;
+    case ASTRA_FONT_BODY:
+    default:               r->font_pixel_size = r->font_pixel_main; break;
+  }
+}
+
+/* MCU 后端：角色 → 不同点阵表 */
+static void my_set_font(hal *self, astra_font_role role) {
+  my_hal *m = (my_hal *) self;
+  switch (role) {
+    case ASTRA_FONT_TITLE: m->glyphs = FONT_8X16; break;
+    case ASTRA_FONT_SMALL: m->glyphs = FONT_5X8;  break;
+    case ASTRA_FONT_BODY:
+    default:               m->glyphs = FONT_6X12; break;
+  }
 }
 ```
 
-**方式 B：指向真正的字模数据**（MCU 常用）
-
-```c
-static const uint8_t FONT_8X16[] = { /* 字模 */ };
-/* hal_get_font_width 里按字模表查表 */
-static void my_set_font(hal *self, const uint8_t *font) {
-  ((my_hal *) self)->font = font ? font : FONT_8X16;
-}
-```
+后端可以让三个角色指向同一套字模（`hal_vbuf` 就是这样：它只有 6×12，
+`set_font()` 记录请求后忽略）。
 
 ### 6.2 `get_font_width` 的精度要求
 
@@ -810,7 +816,8 @@ static void mine_box(hal *self, float x, float y, float w, float h) {
 ### 步骤 4：实现文字
 
 最少需要 `set_font` / `get_font_width` / `get_font_height`，
-以及 `draw_english`（和 `draw_chinese`）。
+以及 `draw_english`（和 `draw_chinese`）。只有一套字模时，`set_font` 直接留空
+（默认 no-op）即可；有多档字号时按 `astra_font_role` 切换。
 
 等宽点阵字体（8×16）示例：
 
@@ -1265,14 +1272,15 @@ hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
 
 ### 14.6 字体
 
-`include/hal_vbuf.h` 导出三个句柄（`hal_vbuf_font_main` / `..._logo_title` /
-`..._logo_copyright`），它们都指向同一套**内置 6×12 ASCII 点阵**（0x20–0x7E）：
+这个后端只有一套**内置 6×12 ASCII 点阵**（0x20–0x7E），三个 `astra_font_role`
+全部映射到它，`set_font()` 只记录请求、不改变输出：
 
-- `hal_get_font_height()` 恒为 12
+- `hal_get_font_height()` 恒为 12（与角色无关）
 - `hal_get_font_width()` 为 `字符数 × 6`
 - 非 ASCII 码点（中文等）绘制为 6×12 空心框，表示"缺字形"
 
-需要中文时，请实现自己的后端（框架只把字符串原样传给后端）。
+所以这里**不需要任何字体句柄**，`astra_demo_init()` 也不收字体参数。
+需要多档字号或中文时，请实现自己的后端（框架只把角色与字符串交给后端）。
 
 ### 14.7 尺寸规则
 
@@ -1450,7 +1458,7 @@ cmake -S Inc/astra -B build ^
 |---|---|
 | 画面按 8 行重复 | 缓冲区索引用错（必须是 `(y * width + x) / 8`） |
 | 全黑 | `hal_inject` 未调用；`screen_weight/height` 为 0 |
-| 文字不出现 | `get_font_width` 返回 0，或字体句柄未绑定 |
+| 文字不出现 | `get_font_width` 返回 0，或 `set_font` 未实现 |
 | 文字上下颠倒／偏一行 | 忘了把左下角转成左上角（`y - font_height`） |
 | 图标是实心块 | `draw_bmp` 的 1/0 约定反了 |
 | 选择框宽度为 0 | `get_font_width` 未实现 |

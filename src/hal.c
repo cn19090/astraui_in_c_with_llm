@@ -34,9 +34,9 @@ static uint8_t default_u8_zero(hal *self) {
   return 0;
 }
 static void default_void(hal *self) { (void) self; }
-static void default_set_font(hal *self, const uint8_t *font) {
+static void default_set_font(hal *self, astra_font_role role) {
   (void) self;
-  (void) font;
+  (void) role;
 }
 static uint8_t default_font_width(hal *self, const char *text) {
   (void) self;

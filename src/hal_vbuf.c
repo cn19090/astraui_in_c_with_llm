@@ -133,11 +133,8 @@ static const uint8_t VBUF_FONT[VBUF_FONT_COUNT][VBUF_GLYPH_H] = {
     {0x00, 0x00, 0x00, 0x00, 0x74, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /* '~' */
 };
 
-/* The three handles the framework treats as opaque font ids. All of them select
-   the same table: a 6x12 cell is the only size this backend can rasterise. */
-const uint8_t hal_vbuf_font_main = 0;
-const uint8_t hal_vbuf_font_logo_title = 1;
-const uint8_t hal_vbuf_font_logo_copyright = 2;
+/* All three font roles map to this one table: a 6x12 cell is the only size
+   this backend can rasterise, so set_font() just records the request. */
 
 #define VBUF_MAX_DIM 2040 /* keeps tile counts inside the uint8_t HAL contract */
 
@@ -458,9 +455,9 @@ static void vbuf_canvas_update(hal *self)
 /* ops: font                                                                 */
 /* ------------------------------------------------------------------------ */
 
-static void vbuf_set_font(hal *self, const uint8_t *font)
+static void vbuf_set_font(hal *self, astra_font_role role)
 {
-  ((hal_vbuf *)self)->font = font;
+  ((hal_vbuf *)self)->font = role;
 }
 
 static uint8_t vbuf_get_font_width(hal *self, const char *text)
@@ -749,7 +746,7 @@ static bool vbuf_setup(hal_vbuf *v, const hal_vbuf_config *cfg_in,
   v->owns_buffer = false;
   v->draw_type = 1;
   v->display_on = true;
-  v->font = &hal_vbuf_font_main;
+  v->font = ASTRA_FONT_BODY;
   v->rng = 0x9E3779B9u;
   v->tick_ms = 0;
   return true;

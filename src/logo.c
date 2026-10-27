@@ -53,14 +53,14 @@ void astra_draw_logo(uint16_t time_frames) {
     static const char *text = "astra UI";
     static const char *copyright = "powered by";
 
-    hal_set_font(cfg->logo_title_font);
+    hal_set_font(ASTRA_FONT_TITLE);
     const float x_title =
         ((float) sys->screen_weight - (float) hal_get_font_width(text)) / 2.0f;
-    hal_set_font(cfg->logo_copy_right_font);
+    hal_set_font(ASTRA_FONT_SMALL);
     const float x_copyright = ((float) sys->screen_weight -
                                (float) hal_get_font_width(copyright)) /
                               2.0f;
-    hal_set_font(cfg->main_font);
+    hal_set_font(ASTRA_FONT_BODY);
 
     /* all coordinates are upper-left corners */
     float y_title = 0.0f - cfg->logo_text_height - 1.0f;
@@ -132,9 +132,9 @@ void astra_draw_logo(uint16_t time_frames) {
       astra_anim_step(&y_stars[i], y_stars_trg[i], cfg->logo_animation_speed);
     }
 
-    hal_set_font(cfg->logo_title_font);
+    hal_set_font(ASTRA_FONT_TITLE);
     hal_draw_english(x_title, y_title + cfg->logo_text_height, text);
-    hal_set_font(cfg->logo_copy_right_font);
+    hal_set_font(ASTRA_FONT_SMALL);
     hal_draw_english(x_copyright, y_copyright + cfg->logo_copy_right_height,
                      copyright);
     astra_anim_step(&y_title, y_title_trg, cfg->logo_animation_speed);

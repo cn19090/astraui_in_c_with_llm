@@ -21,15 +21,15 @@
    A page costs sizeof(astra_menu), which is dominated by
    children[ASTRA_MENU_MAX_CHILDREN] and title[ASTRA_TITLE_MAX]. */
 #ifndef ASTRA_MENU_MAX_CHILDREN
-#define ASTRA_MENU_MAX_CHILDREN 4
+#define ASTRA_MENU_MAX_CHILDREN 8
 #endif
 
 #ifndef ASTRA_TITLE_MAX
-#define ASTRA_TITLE_MAX 16
+#define ASTRA_TITLE_MAX 24
 #endif
 
 #ifndef ASTRA_MENU_POOL_SIZE
-#define ASTRA_MENU_POOL_SIZE 20
+#define ASTRA_MENU_POOL_SIZE 32
 #endif
 
 /* A 2D point/offset, returned by value by the camera and selector getters. */
@@ -103,10 +103,17 @@ typedef struct astra_config
   float logo_text_height;
   float logo_copy_right_height;
   uint8_t logo_star_num;
-
-  const uint8_t *logo_title_font;
-  const uint8_t *logo_copy_right_font;
-  const uint8_t *main_font;
 } astra_config;
+
+/* Which of the three built-in font roles to draw with. The framework only ever
+   asks for one of these; the backend maps each role to a concrete size (a TTF
+   rasterisation size, a bitmap table, a font chip id, ...). Keeping this an
+   enum instead of an opaque pointer means the framework never has to carry
+   backend-owned handles around. */
+typedef enum astra_font_role {
+  ASTRA_FONT_TITLE = 0, /* logo headline, largest */
+  ASTRA_FONT_BODY,      /* menu entries and titles */
+  ASTRA_FONT_SMALL,     /* logo copyright line, smallest */
+} astra_font_role;
 
 #endif /* ASTRA_TYPES_H_ */

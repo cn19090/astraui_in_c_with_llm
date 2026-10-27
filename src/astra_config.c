@@ -65,11 +65,6 @@ astra_config astra_config_default(void)
   c.logo_copy_right_height = 8.0f;
   c.logo_star_num = 16;
 
-  /* null = "framework default"; the backend maps null to its normal size. */
-  c.logo_title_font = NULL;
-  c.logo_copy_right_font = NULL;
-  c.main_font = NULL;
-
   return c;
 }
 
