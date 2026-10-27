@@ -11,7 +11,6 @@
 #include "hal_vbuf.h"
 
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 /* Arm 目标上 printf() 走半主机（BKPT 0xAB），真机没有调试器接管时会表现为
@@ -452,7 +451,7 @@ static const uint8_t VBUF_FONT_12X24[VBUF_FONT_COUNT][24] = {
 /* Nearest-neighbour plot honouring draw_type, the clip rect and display_on. */
 static void plot(hal_vbuf *v, int x, int y)
 {
-  if (v->buffer == NULL || !v->display_on)
+  if (!v->display_on)
     return;
   if (x < 0 || y < 0 || x >= ASTRA_PANEL_WIDTH || y >= ASTRA_PANEL_HEIGHT)
     return;
@@ -681,11 +680,13 @@ static void vbuf_init(hal *self)
 static void vbuf_deinit(hal *self)
 {
   hal_vbuf *v = (hal_vbuf *)self;
-  if (v->owns_buffer)
-    free(v->buffer);
-  v->buffer = NULL;
-  v->buffer_bytes = 0;
-  v->owns_buffer = false;
+
+  /* Nothing to release: the canvas is part of the instance and the instance
+     belongs to the caller. Just make sure a stale flush pointer cannot fire
+     after teardown. */
+  v->flush = NULL;
+  v->flush_user = NULL;
+  v->display_on = false;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -712,15 +713,14 @@ static uint8_t vbuf_get_buffer_tile_height(hal *self)
 static void vbuf_canvas_clear(hal *self)
 {
   hal_vbuf *v = (hal_vbuf *)self;
-  if (v->buffer != NULL)
-    memset(v->buffer, 0, v->buffer_bytes);
+  memset(v->buffer, 0, sizeof(v->buffer));
 }
 
 /* No hardware to poke: hand the finished frame to the host callback, if any. */
 static void vbuf_canvas_update(hal *self)
 {
   hal_vbuf *v = (hal_vbuf *)self;
-  if (v->flush != NULL && v->buffer != NULL)
+  if (v->flush != NULL)
     v->flush(v->flush_user, v->buffer, ASTRA_PANEL_WIDTH, ASTRA_PANEL_HEIGHT);
 }
 
@@ -918,8 +918,7 @@ static void vbuf_screen_off(hal *self)
 {
   hal_vbuf *v = (hal_vbuf *)self;
   v->display_on = false;
-  if (v->buffer != NULL)
-    memset(v->buffer, 0, v->buffer_bytes);
+  memset(v->buffer, 0, sizeof(v->buffer));
 }
 
 static void vbuf_print_info(hal *self, const char *msg)
@@ -986,14 +985,13 @@ static const hal_ops vbuf_ops = {
 /* construction                                                              */
 /* ------------------------------------------------------------------------ */
 
-/* Bookkeeping shared by both constructors. Geometry is compile-time (see
-   astra_panel.h), so there is nothing to validate or fall back on. */
-static void vbuf_setup(hal_vbuf *v, uint8_t *canvas)
+/* Bookkeeping for the single constructor. Geometry is compile-time (see
+   astra_panel.h), so there is nothing to validate or fall back on. Zeroing the
+   whole instance also clears the embedded canvas, which makes the first frame
+   deterministic even when the caller reuses a dirty struct. */
+static void vbuf_setup(hal_vbuf *v)
 {
   memset(v, 0, sizeof(*v));
-  v->buffer = canvas;
-  v->buffer_bytes = ASTRA_PANEL_CANVAS_BYTES;
-  v->owns_buffer = false;
   v->draw_type = 1;
   v->display_on = true;
   v->font = ASTRA_FONT_BODY;
@@ -1001,40 +999,20 @@ static void vbuf_setup(hal_vbuf *v, uint8_t *canvas)
   v->tick_ms = 0;
 }
 
-hal *hal_vbuf_init_static(hal_vbuf *storage, uint8_t *canvas,
-                          size_t canvas_bytes_len)
+hal *hal_vbuf_init(hal_vbuf *storage)
 {
-  if (storage == NULL || canvas == NULL) return NULL;
-  if (canvas_bytes_len < ASTRA_PANEL_CANVAS_BYTES) return NULL;
+  if (storage == NULL) return NULL;
 
-  vbuf_setup(storage, canvas);
+  vbuf_setup(storage);
+  /* Static construction: hal_destroy() runs deinit() but never free()s. */
   hal_construct(&storage->base, &vbuf_ops);
   return &storage->base;
-}
-
-hal *hal_vbuf_create(void)
-{
-  hal_vbuf *v = (hal_vbuf *)calloc(1, sizeof(hal_vbuf));
-  if (v == NULL) return NULL;
-
-  uint8_t *canvas = (uint8_t *)calloc(ASTRA_PANEL_CANVAS_BYTES, 1);
-  if (canvas == NULL)
-  {
-    free(v);
-    return NULL;
-  }
-
-  vbuf_setup(v, canvas);
-  v->owns_buffer = true;
-  /* Owned: hal_destroy() frees the instance, deinit() frees the canvas. */
-  hal_construct_owned(&v->base, &vbuf_ops);
-  return &v->base;
 }
 
 void hal_vbuf_deinit(hal_vbuf *v)
 {
   if (v == NULL) return;
-  vbuf_deinit(&v->base); /* releases the canvas only when it owns it */
+  vbuf_deinit(&v->base);
 }
 /* ------------------------------------------------------------------------ */
 /* host facing API                                                           */

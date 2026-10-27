@@ -117,7 +117,8 @@ Inc\astra\build\Debug\astra_test_hal.exe
 ```c
 #include "hal_vbuf.h"
 
-hal_inject(hal_vbuf_create());           /* 几何来自 ASTRA_PANEL */
+static hal_vbuf s_vbuf;                  /* 实例 + 画布都在 .bss */
+hal_inject(hal_vbuf_init(&s_vbuf));      /* 不分配任何内存 */
 hal_vbuf_set_flush(my_flush, &my_bus);   /* 每帧回调，可选 */
 
 /* ... 运行 UI ... */
@@ -137,9 +138,9 @@ int h = hal_vbuf_height();
 
 - 按键不经过 HAL：用应用自己的输入层（示例是 `astra_demo_key_set()`）
 - 时间用 `hal_vbuf_advance(16)` 每帧推进；`hal_delay()` 不阻塞，只推进虚拟时钟
-- 静态存储（MCU 常用）：`hal_vbuf_init_static(&vbuf, &cfg, canvas, sizeof(canvas))`，
-  然后 `hal_inject(&vbuf.base)`，结束时 `hal_vbuf_deinit()`（不释放你的数组）
-- 内置 6x12 ASCII 字模，非 ASCII 码点画成空心框
+- **零动态分配**：画布内嵌在实例里，实例由你提供，所以裸机可以不链接堆；
+  结束时 `hal_vbuf_deinit()` 只清状态，不释放任何东西
+- 内置 ASCII 字模（按面板选 5x8 / 6x12 / 8x16 / 12x24），非 ASCII 码点画成空心框
 
 ### B. 自己实现一个后端
 

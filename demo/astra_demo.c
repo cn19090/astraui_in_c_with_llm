@@ -33,10 +33,13 @@
 /* 开机 Logo 的推进帧数：60 FPS 下约 1.8 秒。 */
 #define LOGO_FRAMES 110
 
-/* 磁贴主图的尺寸（所有分辨率的素材都用这一套）。 */
+/* 磁贴主图的尺寸（所有分辨率的素材都用这一套）。
+   注意 stride 必须是 (宽 + 7) / 8：draw_bmp 就是这么算行宽的，30 px 宽占
+   4 字节而不是 3 字节，按 w*h/8 算会少分配 8 字节并读到数组外面。 */
 #define ICON_SRC_W 30
 #define ICON_SRC_H 30
-#define ICON_SRC_BYTES (ICON_SRC_W * ICON_SRC_H / 8)
+#define ICON_SRC_STRIDE ((ICON_SRC_W + 7) / 8)
+#define ICON_SRC_BYTES (ICON_SRC_STRIDE * ICON_SRC_H)
 
 /* ------------------------------------------------------------------------ */
 /* 磁贴图标：30x30 像素，每行 4 字节，MSB 是最左边的像素，1 表示点亮。
@@ -89,6 +92,11 @@ static const uint8_t PIC_ABOUT[120] = {
     0x00, 0xE0, 0x01, 0xC0, 0x00, 0xE0, 0x01, 0xC0, 0x00, 0x00, 0x00, 0xC0,
     0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0xC0};
 
+/* 素材行宽由 draw_bmp 决定（(w + 7) / 8），图标数组必须与之一致：少一个字节
+   就会读到数组外面，画面在最后一列出现随机像素。 */
+typedef char icon_src_size_check
+    [(sizeof(PIC_SYSTEM) == ICON_SRC_BYTES) ? 1 : -1];
+
 /* ------------------------------------------------------------------------ */
 /* 磁贴图标：按面板放大                                                       */
 /* ------------------------------------------------------------------------ */
@@ -98,7 +106,8 @@ static const uint8_t PIC_ABOUT[120] = {
    位图。这里启动时把 30x30 主图按整像素块展开一次，之后每帧直接整块贴。 */
 #define ICON_DST_W (ICON_SRC_W * ASTRA_PANEL_ICON_SCALE)
 #define ICON_DST_H (ICON_SRC_H * ASTRA_PANEL_ICON_SCALE)
-#define ICON_DST_BYTES (ICON_DST_W * ICON_DST_H / 8)
+#define ICON_DST_STRIDE ((ICON_DST_W + 7) / 8)
+#define ICON_DST_BYTES (ICON_DST_STRIDE * ICON_DST_H)
 
 #if ASTRA_PANEL_HAS_TILES
 static uint8_t s_icon_system[ICON_DST_BYTES];
@@ -111,12 +120,12 @@ static void icon_scale_up(const uint8_t *src, uint8_t *dst)
 #if ASTRA_PANEL_ICON_SCALE == 1
   memcpy(dst, src, ICON_SRC_BYTES);
 #else
-  const int dst_stride = ICON_DST_W / 8;
+  const int dst_stride = ICON_DST_STRIDE;
   memset(dst, 0, ICON_DST_BYTES);
 
   for (int sy = 0; sy < ICON_SRC_H; ++sy)
   {
-    const uint8_t *row = src + sy * (ICON_SRC_W / 8);
+    const uint8_t *row = src + sy * ICON_SRC_STRIDE;
     for (int sx = 0; sx < ICON_SRC_W; ++sx)
     {
       if (((row[sx / 8] >> (7 - (sx % 8))) & 1u) == 0) continue;

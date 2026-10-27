@@ -644,21 +644,18 @@ astra_demo_update();
 | 页面对象 | 静态池 `ASTRA_MENU_POOL_SIZE` 个槽 |
 | 选择框 / 相机 / 启动器 | 调用方提供存储 |
 | 配置 | 单个静态实例 |
-| 画布（后端内） | 按配置的宽高分配，`hal_destroy()` 时释放 |
-| 后端实例 | 由后端 `*_create()` 决定（raylib 后端用 `calloc`） |
+| 画布（后端内） | 内嵌在后端实例里，大小 = 面板面积 / 8 |
+| 后端实例 | 由调用者提供（`hal_vbuf`）或后端自带静态实例（raylib） |
 
-框架核心**不分配堆内存**。页面池是整体复用的，所以 `open()` / `close()`
-不产生分配或释放。后端的画布大小由面板决定，由后端自己管理。
+整个框架**不调用 `malloc`/`free`**：页面池是整体复用的，所以 `open()` / `close()` 不产生分配或释放；`hal_vbuf` 的实例和画布都由调用者提供（`hal_vbuf_init(&s_vbuf)`），raylib 后端用一个内建静态实例。裸机工程可以不链接堆。
 
 ### 推荐启动 / 关闭顺序
 
 ```c
 int main(void) {
-    /* 1. 选屏幕尺寸并开窗口（后端无关时换成你的 BSP 初始化） */
+    /* 1. 开窗口（面板尺寸是编译期的 ASTRA_PANEL，这里只调窗口表现） */
     hal_raylib_config dev;
-    hal_raylib_config_default(&dev);
-    dev.width  = 128;              /* 只改这两行就能换屏 */
-    dev.height = 64;
+    hal_raylib_config_default(&dev);   /* 窗口自动尺寸 */
 
     int ww, wh;
     hal_raylib_window_size(&dev, &ww, &wh);
@@ -667,20 +664,19 @@ int main(void) {
     /* 2. 注入后端 —— 必须在任何 hal_* 调用之前 */
     hal_inject(hal_raylib_create_with(&dev));
 
-
-    /* 4. 建菜单并启动 */
+    /* 3. 建菜单并启动 */
     astra_menu_pool_reset();
     astra_menu *root = astra_menu_create("root");
     /* ... add_item ... */
     astra_launcher_init(&launcher, root, &selector, &camera);
 
-    /* 5. 主循环 */
+    /* 4. 主循环 */
     while (!WindowShouldClose()) {
         read_buttons_and_dispatch();  /* 你自己的输入策略 */
         astra_launcher_update(&launcher);
     }
 
-    /* 6. 反向拆除：先框架，后平台 */
+    /* 5. 反向拆除：先框架，后平台 */
     astra_menu_pool_reset();
     hal_destroy();
     CloseWindow();               /* 必须在 hal_destroy() 之后 */

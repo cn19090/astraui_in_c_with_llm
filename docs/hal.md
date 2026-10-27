@@ -1189,8 +1189,8 @@ size       = tile_w * tile_h * 8 = width * height / 8
 ```c
 #include "hal_vbuf.h"
 
-/* 堆：实例和画布一起分配，hal_destroy() 一并释放 */
-hal_inject(hal_vbuf_create());   /* 几何来自 ASTRA_PANEL，无需参数 */
+static hal_vbuf s_vbuf;          /* 实例 + 画布都在 .bss，没有任何分配 */
+hal_inject(hal_vbuf_init(&s_vbuf));
 ```
 
 两种把画面交出去的方式：
@@ -1226,21 +1226,31 @@ astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, true);   /* 按下 */
 astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, false);  /* 松开 */
 ```
 
-### 14.5 静态存储（MCU）
+### 14.5 存储：没有任何动态分配
+
+画布是实例的成员（`uint8_t buffer[ASTRA_PANEL_CANVAS_BYTES]`），实例由调用者
+提供，所以这个后端不调用 `malloc`，裸机上连堆实现都不用链接：
 
 ```c
-static hal_vbuf  s_vbuf;
-static uint8_t   s_canvas[ASTRA_PANEL_CANVAS_BYTES];   /* 1024 B @128x64 */
-
-hal_vbuf_init_static(&s_vbuf, s_canvas, sizeof(s_canvas));
-hal_inject(&s_vbuf.base);
+static hal_vbuf s_vbuf;                            /* .bss：实例 + 画布 */
+hal_inject(hal_vbuf_init(&s_vbuf));
 
 /* ... */
 
-hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
+hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，内存仍归调用者 */
 ```
 
-`hal_vbuf_init_static()` 会在数组太小时返回 `NULL`，不会越界。
+`hal_vbuf_init()` 会把整个实例（含画布）清零，因此即使复用一块脏内存，第一帧
+也是确定的。它也适合放在栈上——测试里就这么用：
+
+```c
+hal_vbuf tmp;
+hal_vbuf_init(&tmp);
+hal_inject(&tmp.base);
+```
+
+`sizeof(hal_vbuf)` = 72 B 头部 + 画布（1024 / 512 / 2048 / 7200 B）。
+想省 RAM 就选更小的面板，而不是换分配策略。
 
 ### 14.6 字体
 
@@ -1268,8 +1278,8 @@ hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
 ### 14.7 尺寸规则
 
 尺寸不再有运行时校验：宏在编译期就固定了，`astra_panel.h` 用 `#error` 挡住
-非 8 倍数的取值。构造函数只剩一条规则——`hal_vbuf_init_static()` 传入的
-数组必须 ≥ `ASTRA_PANEL_CANVAS_BYTES`，否则返回 `NULL`（不会越界写）。
+非 8 倍数的取值。构造函数只剩一条规则——`hal_vbuf_init()` 的实例指针不能是
+`NULL`（"传 0 用默认值"那套已经不存在了）。
 
 ### 14.8 与硬件后端的行为差异
 
@@ -1280,10 +1290,10 @@ hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
 | `millis` | 虚拟时钟 | 硬件 tick |
 | 按键 | 与应用层无关 | 与应用层无关（两者都不在 HAL 里） |
 | 字体 | 内置点阵（按面板选一套） | 由你决定（TTF 栅格化、字库芯片…） |
-| 内存 | 画布 0.5 / 1 / 2 / 7 KiB | 通常还要一份面板镜像 |
+| 内存 | 画布内嵌在实例里，0 次分配 | 通常还要一份面板镜像 |
 
 自测：`tests/test_vbuf.c` 覆盖 12 项，包括面板几何、页布局、三种绘制模式、
-裁剪、刷新回调、虚拟时钟、静态存储与销毁顺序。四种面板都跑过。
+裁剪、刷新回调、虚拟时钟、内嵌画布与销毁顺序。四种面板都跑过。
 
 ---
 
@@ -1348,14 +1358,14 @@ Release `/O2`、MSVC x64 实测，`sizeof` 与 `.data/.bss` 段统计：
 `astra_camera`(20) 由调用方提供存储，不在框架的 `.bss` 里。
 
 以上数字**与面板无关**：`astra_config` 是 176 B、`astra_menu` 是 184 B，
-换 `ASTRA_PANEL` 不改静态池。会随面板变化的只有画布（`hal_vbuf` 堆内或你的静态数组）：
+换 `ASTRA_PANEL` 不改静态池。会随面板变化的只有画布，它是实例的一部分：
 
 | 面板 | 画布 | `sizeof(hal_vbuf)` |
 |---|---|---|
-| 128x64 | 1024 B | 72 B |
-| 128x32 | 512 B | 72 B |
-| 128x128 | 2048 B | 72 B |
-| 240x240 | 7200 B | 72 B |
+| 128x64 | 1024 B | 1,096 B |
+| 128x32 | 512 B | 584 B |
+| 128x128 | 2048 B | 2,120 B |
+| 240x240 | 7200 B | 7,272 B |
 
 ### 16.2 可裁剪的宏
 
@@ -1378,13 +1388,16 @@ cmake -S Inc/astra -B build ^
 | `LOGO_STARS_MAX` | 32 | 每颗 12 B | `config.logo_star_num` 默认 16，设 16 即可 |
 | `ASTRA_PANEL` | `ASTRA_PANEL_128x64` | 整套排版数值 + 内置字体 + 画布大小 | 只影响观感与画布，不改静态池 |
 | `ASTRA_PRINT_LINES` / `_COLS` | 8 / 48 | 两者相乘 | 只在用 `hal_print_info()` 时有意义 |
-| `hal_vbuf` 画布 | 按面板 | `w*h/8` | 用 `hal_vbuf_init_static()` 可完全静态 |
+| `hal_vbuf` 画布 | 按面板 | 内嵌在实例里 | 随 `ASTRA_PANEL` 变化，见 14.5 |
 
 ### 16.3 无堆
 
-框架核心**不分配堆内存**。`hal_vbuf_create()` 是唯一会 `malloc` 的路径
-（实例 72 B + 画布）；MCU 上用 `hal_vbuf_init_static()` 换成静态数组，
-连 `malloc` 实现都可以不链接。
+整个框架**不调用 `malloc`/`free`**：对象池是静态数组，`hal_vbuf` 的画布内嵌在
+实例里，实例由调用者提供（`.bss`、栈或自己的内存池）。因此裸机工程可以完全
+不链接堆实现，也不存在碎片问题。
+
+`hal_construct_owned()`（`hal.h`）仍然保留，供 PC 侧后端或测试使用——它只是
+让 `hal_destroy()` 顺手 `free()` 实例；框架自身从不使用它。
 
 ### 16.4 每帧绘制量
 

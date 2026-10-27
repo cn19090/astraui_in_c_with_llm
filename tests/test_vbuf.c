@@ -34,6 +34,12 @@ static int s_failures = 0;
 /* helpers                                                                   */
 /* ------------------------------------------------------------------------ */
 
+/* 后端不分配内存：实例和画布都由调用者提供。测试里共用一块静态实例，
+   每次 hal_vbuf_init() 都会把它整体清零。 */
+static hal_vbuf s_vbuf;
+
+static hal *vbuf_reset(void) { return hal_vbuf_init(&s_vbuf); }
+
 static bool pixel_at(const uint8_t *buf, int width, int x, int y) {
   const uint8_t page = buf[(y * width + x) / 8];
   return ((page >> (7 - (x % 8))) & 1u) != 0;
@@ -68,7 +74,7 @@ static void probe_flush(void *user, const uint8_t *buffer, int width, int height
 /* ------------------------------------------------------------------------ */
 
 static void test_panel_geometry(void) {
-  hal *h = hal_vbuf_create();
+  hal *h = vbuf_reset();
   CHECK(h != NULL);
   CHECK(hal_inject(h));
 
@@ -98,11 +104,11 @@ static void test_panel_geometry(void) {
 /* ------------------------------------------------------------------------ */
 
 static void test_canvas_clear_and_layout(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
   const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
-  CHECK(count_lit(buf, bytes) == 0); /* calloc'd */
+  CHECK(count_lit(buf, bytes) == 0); /* init() zeroes the embedded canvas */
 
   hal_set_draw_type(1);
   hal_draw_pixel(0.0f, 0.0f);
@@ -125,7 +131,7 @@ static void test_canvas_clear_and_layout(void) {
 }
 
 static void test_draw_type(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
 
   hal_set_draw_type(1);
@@ -148,7 +154,7 @@ static void test_draw_type(void) {
 }
 
 static void test_clipping(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
   const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
@@ -166,7 +172,7 @@ static void test_clipping(void) {
 }
 
 static void test_primitives(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
 
   hal_set_draw_type(1);
@@ -199,7 +205,7 @@ static void test_primitives(void) {
 }
 
 static void test_text(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
   const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
@@ -236,7 +242,7 @@ static void test_text(void) {
 /* ------------------------------------------------------------------------ */
 
 static void test_flush_hook(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
 
   flush_probe probe;
   memset(&probe, 0, sizeof(probe));
@@ -263,7 +269,7 @@ static void test_flush_hook(void) {
 }
 
 static void test_clock(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
 
   CHECK(hal_millis() == 0);
 
@@ -286,7 +292,7 @@ static void test_clock(void) {
 }
 
 static void test_screen_off(void) {
-  hal_inject(hal_vbuf_create());
+  hal_inject(vbuf_reset());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
   const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
@@ -312,32 +318,34 @@ static void test_screen_off(void) {
 /* ownership                                                                 */
 /* ------------------------------------------------------------------------ */
 
-static void test_static_storage(void) {
+static void test_embedded_canvas(void) {
   static hal_vbuf vbuf;
-  static uint8_t canvas[ASTRA_PANEL_CANVAS_BYTES];
 
-  /* 少一个字节就装不下整块画布：必须被拒绝，而不是越界写。 */
-  CHECK(hal_vbuf_init_static(&vbuf, canvas, sizeof(canvas) - 1u) == NULL);
-
-  hal *h = hal_vbuf_init_static(&vbuf, canvas, sizeof(canvas));
+  hal *h = hal_vbuf_init(&vbuf);
   CHECK(h == &vbuf.base);
   CHECK(hal_inject(h));
-  CHECK(hal_vbuf_width() == ASTRA_PANEL_WIDTH);
-  CHECK(hal_vbuf_canvas() == canvas); /* 用的是调用者的数组，不是副本 */
+
+  /* 画布是实例的成员，不是另外分配的指针。 */
+  CHECK(hal_vbuf_canvas() == vbuf.buffer);
+  CHECK(sizeof(vbuf.buffer) == ASTRA_PANEL_CANVAS_BYTES);
 
   hal_set_draw_type(1);
   hal_draw_pixel(0.0f, 0.0f);
-  CHECK(canvas[0] == 0x80);
+  CHECK(vbuf.buffer[0] == 0x80);
 
-  hal_vbuf_deinit(&vbuf); /* 不释放任何东西：数组仍归调用者 */
-  CHECK(canvas[0] == 0x80);
+  hal_vbuf_deinit(&vbuf); /* 不释放任何东西：实例归调用者 */
+  CHECK(vbuf.buffer[0] == 0x80);
 
-  printf("ok  static storage uses the caller's array and is not freed\n");
+  /* hal_destroy() 只是取消发布，不会 free() 静态实例；之后宿主 API 失效。 */
+  hal_destroy();
+  CHECK(hal_vbuf_canvas() == NULL);
+
+  printf("ok  the canvas is embedded in the instance, nothing is freed\n");
 }
 
 static void test_repeated_cycles(void) {
   for (int i = 0; i < 5; ++i) {
-    hal *h = hal_vbuf_create();
+    hal *h = vbuf_reset();
     CHECK(h != NULL);
     CHECK(hal_inject(h));
     CHECK(hal_vbuf_canvas() != NULL);
@@ -376,7 +384,7 @@ int main(void) {
   test_flush_hook();
   test_clock();
   test_screen_off();
-  test_static_storage();
+  test_embedded_canvas();
   test_repeated_cycles();
   test_host_api_without_backend();
 
