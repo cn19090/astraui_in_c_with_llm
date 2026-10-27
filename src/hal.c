@@ -110,16 +110,29 @@ static void default_beep_vol(hal *self, uint8_t vol) {
  * @brief Auto-wrapping log output: keeps the last N lines on screen.
  * @note Blocking (it renders and presents). Do not call it from a render loop.
  */
+
+/* Debug-only on-screen log. Both numbers are overridable so a small MCU can
+   shrink the 384 B cache or drop the feature entirely. */
+#ifndef ASTRA_PRINT_LINES
+#define ASTRA_PRINT_LINES 8
+#endif
+
+#ifndef ASTRA_PRINT_COLS
+#define ASTRA_PRINT_COLS 48
+#endif
+
 void hal_default_print_info(hal *self, const char *msg) {
-  static char s_cache[8][48];
+  static char s_cache[ASTRA_PRINT_LINES][ASTRA_PRINT_COLS];
   static uint8_t s_count = 0;
 
   const uint8_t font_height = self->ops->get_font_height(self);
   const uint8_t max_lines =
-      font_height == 0 ? 8 : (uint8_t) (self->config.screen_height / font_height);
+      font_height == 0
+          ? ASTRA_PRINT_LINES
+          : (uint8_t) (self->config.screen_height / font_height);
 
   if (s_count >= max_lines) s_count = 0;
-  if (s_count < 8) {
+  if (s_count < ASTRA_PRINT_LINES) {
     snprintf(s_cache[s_count], sizeof(s_cache[0]), "%s", msg == NULL ? "" : msg);
     s_count++;
   }
@@ -202,6 +215,11 @@ void hal_construct_owned(hal *h, const hal_ops *ops) {
 hal *hal_get(void) { return s_hal; }
 
 bool hal_check(void) { return s_hal != NULL; }
+
+const astra_sys_config *hal_system_config_or_default(void) {
+  static const astra_sys_config s_default = {128, 64, 255.0f};
+  return s_hal != NULL ? &s_hal->config : &s_default;
+}
 
 bool hal_inject(hal *h) {
   if (h == NULL || h->ops == NULL) return false;

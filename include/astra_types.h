@@ -15,10 +15,22 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Fixed capacities keep every page in static storage. */
+/* Fixed capacities keep every page in static storage. Override any of them at
+   build time (e.g. -DASTRA_MENU_POOL_SIZE=16) to trade capability for RAM;
+   these three macros are the only knobs that change the static footprint.
+   A page costs sizeof(astra_menu), which is dominated by
+   children[ASTRA_MENU_MAX_CHILDREN] and title[ASTRA_TITLE_MAX]. */
+#ifndef ASTRA_MENU_MAX_CHILDREN
 #define ASTRA_MENU_MAX_CHILDREN 8
+#endif
+
+#ifndef ASTRA_TITLE_MAX
 #define ASTRA_TITLE_MAX 24
+#endif
+
+#ifndef ASTRA_MENU_POOL_SIZE
 #define ASTRA_MENU_POOL_SIZE 32
+#endif
 
 /* A 2D point/offset, returned by value by the camera and selector getters. */
 typedef struct astra_vec2 {

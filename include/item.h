@@ -37,12 +37,9 @@ typedef enum astra_page_type {
 typedef struct astra_menu astra_menu;
 
 struct astra_menu {
-  /* Effective configuration, refreshed at the start of every render/animation
-     step so runtime config changes take effect. */
-  astra_sys_config system_config;
-  astra_config astra_config;
-
-  /* Layout. */
+  /* Layout. Screen geometry and the tunables are read live from
+     hal_system_config_or_default() / astra_ui_config(), so a page costs
+     nothing but its own state (this keeps the pool small on MCUs). */
   astra_position position;
   astra_fg_position position_fg;
 
@@ -82,6 +79,8 @@ uint16_t astra_menu_pool_used(void);
 /* Menu                                                                      */
 /* ------------------------------------------------------------------------ */
 
+/* Kept for source compatibility; configuration is no longer cached anywhere,
+   so there is nothing to refresh. */
 void astra_item_update_config(astra_menu *menu);
 
 void astra_menu_init(astra_menu *menu, astra_vec2 camera);
@@ -99,9 +98,6 @@ bool astra_menu_add_item(astra_menu *menu, astra_menu *child);
 /* ------------------------------------------------------------------------ */
 
 typedef struct astra_selector {
-  astra_sys_config system_config;
-  astra_config astra_config;
-
   astra_menu *menu;
 
   float x, x_trg;
@@ -123,9 +119,6 @@ astra_vec2 astra_selector_position(const astra_selector *sel);
 /* ------------------------------------------------------------------------ */
 
 typedef struct astra_camera {
-  astra_sys_config system_config;
-  astra_config astra_config;
-
   float x_init, y_init;
   float x, y;
   bool moving;

@@ -43,6 +43,31 @@ target_include_directories(astra PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 # ---------------------------------------------------------------------------
+# Capacity knobs: the only macros that change the static RAM footprint.
+# Every page costs sizeof(astra_menu) ~= 24 + 4*ASTRA_MENU_MAX_CHILDREN
+#                                    + ASTRA_TITLE_MAX bytes.
+#
+#   cmake -S Inc/astra -B build -DASTRA_MENU_POOL_SIZE=16
+#
+# Defaults match the upstream layout; lower them on a small MCU.
+# ---------------------------------------------------------------------------
+set(ASTRA_MENU_POOL_SIZE 32 CACHE STRING "Number of page objects (pool size)")
+set(ASTRA_MENU_MAX_CHILDREN 8 CACHE STRING "Max children per page")
+set(ASTRA_TITLE_MAX 24 CACHE STRING "Title buffer size in bytes")
+set(LOGO_STARS_MAX 32 CACHE STRING "Max logo stars (config default is 16)")
+set(ASTRA_PRINT_LINES 8 CACHE STRING "hal_default_print_info cache lines")
+set(ASTRA_PRINT_COLS 48 CACHE STRING "hal_default_print_info bytes per line")
+
+target_compile_definitions(astra PUBLIC
+    ASTRA_MENU_POOL_SIZE=${ASTRA_MENU_POOL_SIZE}
+    ASTRA_MENU_MAX_CHILDREN=${ASTRA_MENU_MAX_CHILDREN}
+    ASTRA_TITLE_MAX=${ASTRA_TITLE_MAX}
+    ASTRA_PRINT_LINES=${ASTRA_PRINT_LINES}
+    ASTRA_PRINT_COLS=${ASTRA_PRINT_COLS})
+target_compile_definitions(astra PRIVATE
+    LOGO_STARS_MAX=${LOGO_STARS_MAX})
+
+# ---------------------------------------------------------------------------
 # 示例应用：可单独编译，用来证明它只依赖框架公开头文件
 # ---------------------------------------------------------------------------
 add_library(astra_demo STATIC demo/astra_demo.c)

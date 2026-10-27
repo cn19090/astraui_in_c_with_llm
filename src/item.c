@@ -131,11 +131,6 @@ static astra_menu *pool_alloc(void) {
 
   astra_menu *m = &s_pool[s_pool_used++];
   memset(m, 0, sizeof(*m));
-  /* Seed from the live configuration so a menu built after a runtime change
-     (screen size, layout scaling) lays out with the new values. Falls back to
-     the factory defaults when no backend is present yet. */
-  m->system_config = hal_check() ? *hal_system_config() : astra_sys_config_default();
-  m->astra_config = *astra_ui_config();
   m->child_type = ASTRA_PAGE_TILE; /* decided by the first add_item() */
   return m;
 }
@@ -148,9 +143,10 @@ astra_menu *astra_menu_create(const char *title) {
   m->self_type = ASTRA_PAGE_LIST;
   m->pic = NULL;
 
-  m->position.x = m->astra_config.list_text_margin;
+  const float text_margin = astra_ui_config()->list_text_margin;
+  m->position.x = text_margin;
   m->position.y = 0.0f;
-  m->position.x_trg = m->astra_config.list_text_margin;
+  m->position.x_trg = text_margin;
   m->position.y_trg = 0.0f;
   return m;
 }
@@ -166,7 +162,7 @@ astra_menu *astra_menu_create_tile(const char *title, const uint8_t *pic) {
   m->position.x = 0.0f;
   m->position.y = 0.0f;
   m->position.x_trg = 0.0f;
-  m->position.y_trg = m->astra_config.tile_pic_top_margin;
+  m->position.y_trg = astra_ui_config()->tile_pic_top_margin;
   return m;
 }
 
@@ -175,10 +171,11 @@ astra_menu *astra_menu_create_tile(const char *title, const uint8_t *pic) {
 /* ------------------------------------------------------------------------ */
 
 void astra_item_update_config(astra_menu *menu) {
-  if (menu == NULL) return;
-
-  menu->system_config = *hal_system_config();
-  menu->astra_config = *astra_ui_config();
+  /* Nothing is cached any more: every render and animation step reads
+     astra_ui_config() / hal_system_config_or_default() directly, so a config
+     change is visible on the next frame with no refresh call. Kept as a no-op
+     stub for source compatibility. */
+  (void) menu;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -190,11 +187,13 @@ void astra_menu_init(astra_menu *menu, astra_vec2 camera) {
 
   astra_anim_entry(menu);
 
+  const astra_config *cfg = astra_ui_config();
+  const astra_sys_config *sys = hal_system_config_or_default();
+
   if (menu->child_type == ASTRA_PAGE_TILE) {
-    if (menu->astra_config.tile_unfold) {
+    if (cfg->tile_unfold) {
       for (uint8_t i = 0; i < menu->child_count; ++i)
-        menu->children[i]->position.x =
-            camera.x - menu->astra_config.tile_pic_width;
+        menu->children[i]->position.x = camera.x - cfg->tile_pic_width;
       menu->position_fg.w_bar = 0.0f;
     } else {
       for (uint8_t i = 0; i < menu->child_count; ++i)
@@ -202,15 +201,14 @@ void astra_menu_init(astra_menu *menu, astra_vec2 camera) {
       menu->position_fg.w_bar = menu->position_fg.w_bar_trg;
     }
 
-    menu->position_fg.y_arrow = (float) menu->system_config.screen_height;
-    menu->position_fg.y_dotted_line = (float) menu->system_config.screen_height;
-    menu->position_fg.y_bar = 0.0f - menu->astra_config.tile_bar_height;
+    menu->position_fg.y_arrow = (float) sys->screen_height;
+    menu->position_fg.y_dotted_line = (float) sys->screen_height;
+    menu->position_fg.y_bar = 0.0f - cfg->tile_bar_height;
 
   } else if (menu->child_type == ASTRA_PAGE_LIST) {
-    if (menu->astra_config.list_unfold) {
+    if (cfg->list_unfold) {
       for (uint8_t i = 0; i < menu->child_count; ++i)
-        menu->children[i]->position.y =
-            camera.y - menu->astra_config.list_line_height;
+        menu->children[i]->position.y = camera.y - cfg->list_line_height;
       menu->position_fg.h_bar = 0.0f;
     } else {
       for (uint8_t i = 0; i < menu->child_count; ++i)
@@ -218,7 +216,7 @@ void astra_menu_init(astra_menu *menu, astra_vec2 camera) {
       menu->position_fg.h_bar = menu->position_fg.h_bar_trg;
     }
 
-    menu->position_fg.x_bar = (float) menu->system_config.screen_weight;
+    menu->position_fg.x_bar = (float) sys->screen_weight;
   }
 }
 
@@ -231,10 +229,8 @@ void astra_menu_render(astra_menu *menu, astra_vec2 camera) {
   if (menu == NULL) return;
 
   if (menu->child_type == ASTRA_PAGE_TILE) {
-    astra_item_update_config(menu);
-
-    const astra_config *cfg = &menu->astra_config;
-    const astra_sys_config *sys = &menu->system_config;
+    const astra_config *cfg = astra_ui_config();
+    const astra_sys_config *sys = hal_system_config_or_default();
 
     hal_set_draw_type(1);
 
@@ -308,10 +304,8 @@ void astra_menu_render(astra_menu *menu, astra_vec2 camera) {
                     cfg->tile_animation_speed);
 
   } else if (menu->child_type == ASTRA_PAGE_LIST) {
-    astra_item_update_config(menu);
-
-    const astra_config *cfg = &menu->astra_config;
-    const astra_sys_config *sys = &menu->system_config;
+    const astra_config *cfg = astra_ui_config();
+    const astra_sys_config *sys = hal_system_config_or_default();
 
     hal_set_draw_type(1);
 
@@ -390,8 +384,8 @@ bool astra_menu_add_item(astra_menu *menu, astra_menu *child) {
   child->parent = menu;
   menu->children[menu->child_count++] = child;
 
-  const astra_config *cfg = &menu->astra_config;
-  const astra_sys_config *sys = &menu->system_config;
+  const astra_config *cfg = astra_ui_config();
+  const astra_sys_config *sys = hal_system_config_or_default();
 
   if (menu->child_type == ASTRA_PAGE_LIST) {
     child->position.x_trg = cfg->list_text_margin;
@@ -424,15 +418,13 @@ bool astra_menu_add_item(astra_menu *menu, astra_menu *child) {
 void astra_selector_go(astra_selector *sel, uint8_t index) {
   if (sel == NULL || sel->menu == NULL) return;
 
-  sel->system_config = *hal_system_config();
-  sel->astra_config = *astra_ui_config();
-
   astra_menu *menu = sel->menu;
   if (index >= menu->child_count) return; /* out-of-range index is ignored */
 
   menu->select_index = index;
 
-  const astra_config *cfg = &sel->astra_config;
+  const astra_config *cfg = astra_ui_config();
+  const astra_sys_config *sys = hal_system_config_or_default();
 
   if (menu->child_type == ASTRA_PAGE_TILE) {
     sel->x_trg = menu->children[index]->position.x_trg -
@@ -440,9 +432,8 @@ void astra_selector_go(astra_selector *sel, uint8_t index) {
     sel->y_trg = menu->children[index]->position.y_trg -
                  cfg->tile_select_box_margin;
 
-    sel->y_text = (float) sel->system_config.screen_height;
-    sel->y_text_trg = (float) sel->system_config.screen_height -
-                      cfg->tile_text_bottom_margin;
+    sel->y_text = (float) sys->screen_height;
+    sel->y_text_trg = (float) sys->screen_height - cfg->tile_text_bottom_margin;
 
     sel->w_trg = cfg->tile_select_box_width;
     sel->h_trg = cfg->tile_select_box_height;
@@ -469,12 +460,9 @@ bool astra_selector_inject(astra_selector *sel, astra_menu *menu) {
 void astra_selector_render(astra_selector *sel, astra_vec2 camera) {
   if (sel == NULL || sel->menu == NULL) return;
 
-  sel->system_config = *hal_system_config();
-  sel->astra_config = *astra_ui_config();
-
   astra_menu *menu = sel->menu;
-  const astra_config *cfg = &sel->astra_config;
-  const astra_sys_config *sys = &sel->system_config;
+  const astra_config *cfg = astra_ui_config();
+  const astra_sys_config *sys = hal_system_config_or_default();
 
   astra_anim_step(&sel->x, sel->x_trg, cfg->selector_x_animation_speed);
   astra_anim_step(&sel->y, sel->y_trg, cfg->selector_y_animation_speed);
@@ -538,15 +526,9 @@ astra_vec2 astra_selector_position(const astra_selector *sel) {
 /* Camera                                                                    */
 /* ------------------------------------------------------------------------ */
 
-static void camera_reset_config(astra_camera *cam) {
-  cam->system_config = astra_sys_config_default();
-  cam->astra_config = astra_config_default();
-}
-
 void astra_camera_init(astra_camera *cam) {
   if (cam == NULL) return;
   memset(cam, 0, sizeof(*cam));
-  camera_reset_config(cam);
   cam->x_init = 0.0f;
   cam->y_init = 0.0f;
   cam->x = 0.0f;
@@ -556,7 +538,6 @@ void astra_camera_init(astra_camera *cam) {
 void astra_camera_init_at(astra_camera *cam, float x, float y) {
   if (cam == NULL) return;
   memset(cam, 0, sizeof(*cam));
-  camera_reset_config(cam);
   cam->x_init = 0.0f - x;
   cam->y_init = 0.0f - y;
   cam->x = 0.0f - x;
@@ -567,9 +548,13 @@ void astra_camera_init_at(astra_camera *cam, float x, float y) {
  * @return 0 in view, 1 above/left, 2 below/right
  */
 uint8_t astra_camera_out_of_view(astra_camera *cam, float x, float y) {
+  if (cam == NULL) return 0;
+
+  const astra_sys_config *sys = hal_system_config_or_default();
+
   if (x < (0.0f - cam->x) || y < (0.0f - cam->y)) return 1;
-  if (x > (0.0f - cam->x) + (float) cam->system_config.screen_weight - 1.0f ||
-      y > (0.0f - cam->y) + (float) cam->system_config.screen_height - 1.0f)
+  if (x > (0.0f - cam->x) + (float) sys->screen_weight - 1.0f ||
+      y > (0.0f - cam->y) + (float) sys->screen_height - 1.0f)
     return 2;
   return 0;
 }
@@ -584,9 +569,10 @@ astra_vec2 astra_camera_position(const astra_camera *cam) {
 void astra_camera_go(astra_camera *cam, float x, float y) {
   if (cam == NULL) return;
 
+  const float speed = astra_ui_config()->camera_animation_speed;
   cam->moving = true;
-  astra_anim_step(&cam->x, 0.0f - x, cam->astra_config.camera_animation_speed);
-  astra_anim_step(&cam->y, 0.0f - y, cam->astra_config.camera_animation_speed);
+  astra_anim_step(&cam->x, 0.0f - x, speed);
+  astra_anim_step(&cam->y, 0.0f - y, speed);
   if (cam->x == 0.0f - x && cam->y == 0.0f - y) cam->moving = false;
 }
 
@@ -599,43 +585,44 @@ void astra_camera_go_direct(astra_camera *cam, float x, float y) {
 void astra_camera_go_horizontal(astra_camera *cam, float x) {
   if (cam == NULL) return;
   cam->moving = true;
-  astra_anim_step(&cam->x, 0.0f - x, cam->astra_config.camera_animation_speed);
+  astra_anim_step(&cam->x, 0.0f - x, astra_ui_config()->camera_animation_speed);
   if (cam->x == 0.0f - x) cam->moving = false;
 }
 
 void astra_camera_go_vertical(astra_camera *cam, float y) {
   if (cam == NULL) return;
   cam->moving = true;
-  astra_anim_step(&cam->y, 0.0f - y, cam->astra_config.camera_animation_speed);
+  astra_anim_step(&cam->y, 0.0f - y, astra_ui_config()->camera_animation_speed);
   if (cam->y == 0.0f - y) cam->moving = false;
 }
 
 void astra_camera_go_to_next_page_item(astra_camera *cam) {
   if (cam == NULL) return;
+  const float h = (float) hal_system_config_or_default()->screen_height;
   cam->moving = true;
-  astra_anim_step(&cam->y, cam->y - (float) cam->system_config.screen_height,
-                  cam->astra_config.camera_animation_speed);
-  if (cam->y == cam->y - (float) cam->system_config.screen_height)
-    cam->moving = false;
+  astra_anim_step(&cam->y, cam->y - h,
+                  astra_ui_config()->camera_animation_speed);
+  if (cam->y == cam->y - h) cam->moving = false;
 }
 
 void astra_camera_go_to_preview_page_item(astra_camera *cam) {
   if (cam == NULL) return;
+  const float h = (float) hal_system_config_or_default()->screen_height;
   cam->moving = true;
-  astra_anim_step(&cam->y, cam->y + (float) cam->system_config.screen_height,
-                  cam->astra_config.camera_animation_speed);
-  if (cam->y == cam->y + (float) cam->system_config.screen_height)
-    cam->moving = false;
+  astra_anim_step(&cam->y, cam->y + h,
+                  astra_ui_config()->camera_animation_speed);
+  if (cam->y == cam->y + h) cam->moving = false;
 }
 
 void astra_camera_go_to_list_item_page(astra_camera *cam, uint8_t index) {
   if (cam == NULL) return;
 
+  const astra_config *cfg = astra_ui_config();
+  const float h = (float) hal_system_config_or_default()->screen_height;
+
   /* Rows per screen: derived from the live configuration every call, because
      both the panel size and the row pitch are runtime data. */
-  uint8_t max_item_per_screen =
-      (uint8_t) ((float) cam->system_config.screen_height /
-                 cam->astra_config.list_line_height);
+  uint8_t max_item_per_screen = (uint8_t) (h / cfg->list_line_height);
   if (max_item_per_screen == 0) max_item_per_screen = 1;
 
   uint8_t page;
@@ -646,10 +633,10 @@ void astra_camera_go_to_list_item_page(astra_camera *cam, uint8_t index) {
     page = (uint8_t) (index / max_item_per_screen);
   else page = (uint8_t) floorf((float) index / (float) max_item_per_screen);
 
-  astra_camera_go(cam, 0.0f, (float) page * (float) cam->system_config.screen_height);
+  const float target_y = (float) page * h;
+  astra_camera_go(cam, 0.0f, target_y);
 
-  if (cam->y == (float) page * (float) cam->system_config.screen_height)
-    cam->moving = false;
+  if (cam->y == 0.0f - target_y) cam->moving = false;
 }
 
 void astra_camera_go_to_list_item_rolling(astra_camera *cam, astra_vec2 pos) {
@@ -667,8 +654,9 @@ void astra_camera_go_to_list_item_rolling(astra_camera *cam, astra_vec2 pos) {
     if (cam->x == 0.0f - pos.x && cam->y == 0.0f - pos.y) s_direction = 0;
   }
   if (s_direction == 2) {
-    const float target_y = pos.y + cam->astra_config.list_line_height -
-                           (float) cam->system_config.screen_height;
+    const float target_y =
+        pos.y + astra_ui_config()->list_line_height -
+        (float) hal_system_config_or_default()->screen_height;
     astra_camera_go(cam, pos.x, target_y);
     if (cam->x == 0.0f - pos.x && cam->y == 0.0f - target_y) s_direction = 0;
   }
@@ -679,9 +667,9 @@ void astra_camera_go_to_list_item_rolling(astra_camera *cam, astra_vec2 pos) {
 void astra_camera_go_to_tile_item(astra_camera *cam, uint8_t index) {
   if (cam == NULL) return;
 
+  const astra_config *cfg = astra_ui_config();
   const float target =
-      (float) index * (cam->astra_config.tile_pic_width +
-                       cam->astra_config.tile_pic_margin);
+      (float) index * (cfg->tile_pic_width + cfg->tile_pic_margin);
   cam->moving = true;
   astra_camera_go(cam, target, 0.0f);
   if (cam->x == 0.0f - target) cam->moving = false;
@@ -693,9 +681,10 @@ bool astra_camera_is_moving(const astra_camera *cam) {
 
 void astra_camera_reset(astra_camera *cam) {
   if (cam == NULL) return;
+  const float speed = astra_ui_config()->camera_animation_speed;
   cam->moving = true;
-  astra_anim_step(&cam->x, cam->x_init, cam->astra_config.camera_animation_speed);
-  astra_anim_step(&cam->y, cam->y_init, cam->astra_config.camera_animation_speed);
+  astra_anim_step(&cam->x, cam->x_init, speed);
+  astra_anim_step(&cam->y, cam->y_init, speed);
   if (cam->x == cam->x_init && cam->y == cam->y_init) cam->moving = false;
 }
 
@@ -704,9 +693,9 @@ void astra_camera_update(astra_camera *cam, astra_menu *menu,
   if (cam == NULL || menu == NULL || sel == NULL) return;
 
   if (menu->child_type == ASTRA_PAGE_LIST) {
-    if (cam->astra_config.list_page_turning_mode == 0)
+    if (astra_ui_config()->list_page_turning_mode == 0)
       astra_camera_go_to_list_item_page(cam, menu->select_index);
-    else if (cam->astra_config.list_page_turning_mode == 1)
+    else if (astra_ui_config()->list_page_turning_mode == 1)
       astra_camera_go_to_list_item_rolling(cam, astra_selector_position(sel));
   } else if (menu->child_type == ASTRA_PAGE_TILE) {
     astra_camera_go_to_tile_item(cam, menu->select_index);

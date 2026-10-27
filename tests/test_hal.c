@@ -283,8 +283,6 @@ static void test_selector_follows_items(void) {
 
   astra_selector sel;
   memset(&sel, 0, sizeof(sel));
-  sel.system_config = astra_sys_config_default();
-  sel.astra_config = astra_config_default();
   CHECK(astra_selector_inject(&sel, page));
 
   astra_selector_go(&sel, 1);

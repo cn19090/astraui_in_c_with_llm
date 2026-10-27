@@ -105,6 +105,15 @@ typedef enum astra_page_type { ASTRA_PAGE_TILE = 0, ASTRA_PAGE_LIST } astra_page
 #define ASTRA_TITLE_MAX          24   /* 标题字节数（含 '\0'）*/
 ```
 
+三者都可在构建时用 `-D` 覆盖，是**唯一影响静态内存占用**的宏：
+
+```bat
+cmake -S Inc/astra -B build -DASTRA_MENU_POOL_SIZE=20 -DASTRA_MENU_MAX_CHILDREN=4
+```
+
+调小之前先算一下页面数：`sizeof(astra_menu)` ≈ `24 + 4×CHILDREN + TITLE_MAX` 字节，
+乘以 `POOL_SIZE` 就是池的固定开销。详见 [hal.md](hal.md) 的内存预算章节。
+
 ---
 
 ## 3. 配置
@@ -308,8 +317,6 @@ uint16_t astra_menu_pool_used(void);    /* 已使用槽数   */
 
 ```c
 struct astra_menu {
-  astra_sys_config system_config;   /* 生效中的屏幕配置 */
-  astra_config     astra_config;    /* 生效中的 UI 配置 */
   astra_position   position;        /* 当前/目标坐标    */
   astra_fg_position position_fg;    /* 前景元素坐标     */
   char             title[ASTRA_TITLE_MAX];
@@ -323,6 +330,13 @@ struct astra_menu {
 };
 ```
 
+页面**不缓存**屏幕几何与 UI 配置——每次 render/动画都直接读
+`hal_system_config_or_default()` 与 `astra_ui_config()`。这是为了省 RAM：
+早期版本每个页面内嵌一份 `astra_config`（200 B），32 个池槽就是 6.4 KB 的浪费。
+
+副作用是好的：运行时改配置**下一帧就生效**，不需要任何 refresh 调用
+（`astra_item_update_config()` 因此保留为空实现，仅为源码兼容）。
+
 应用层通常只读 `select_index`、`child_count` 与应用自定义的判等。
 
 ---
@@ -333,9 +347,7 @@ struct astra_menu {
 
 ```c
 typedef struct astra_selector {
-  astra_sys_config system_config;
-  astra_config     astra_config;
-  astra_menu      *menu;
+  astra_menu *menu;
   float x, x_trg, y, y_trg;      /* 位置 */
   float w, w_trg, h, h_trg;      /* 尺寸 */
   float y_text, y_text_trg;      /* 磁贴页标题升降 */
@@ -377,8 +389,6 @@ astra_vec2  astra_selector_position(const astra_selector *sel);  /* 返回目标
 
 ```c
 typedef struct astra_camera {
-  astra_sys_config system_config;
-  astra_config     astra_config;
   float x_init, y_init;   /* reset() 回到的位置 */
   float x, y;             /* 当前偏移（负值）   */
   bool  moving;

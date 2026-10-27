@@ -18,8 +18,6 @@ void astra_launcher_init(astra_launcher *l, astra_menu *root,
   astra_menu_init(root, astra_camera_position(camera));
 
   memset(selector, 0, sizeof(*selector));
-  selector->system_config = astra_sys_config_default();
-  selector->astra_config = astra_config_default();
   astra_selector_inject(selector, root);
 }
 

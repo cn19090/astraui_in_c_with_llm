@@ -1330,15 +1330,59 @@ hal_inject(&f.base);
 
 ## 16. 性能与资源
 
-### 内存
+### 16.1 内存预算（实测）
 
-| 项 | 大小 |
-|---|---|
-| 128×64 帧缓冲 | 1024 B |
-| 每帧绘制调用 | 无分配 |
-| 后端结构体 | 约 1–2 KB（桌面后端因字形缓存较大） |
+Release `/O2`、MSVC x64 实测，`sizeof` 与 `.data/.bss` 段统计：
 
-### 每帧绘制量
+| 配置 | 静态 RAM | 说明 |
+|---|---|---|
+| 默认（池 32 / 子项 8 / 标题 24 / 星星 32 / print 8×48） | **6,925 B** | |
+| F103 推荐（池 20 / 星星 16 / print 2×24） | **4,182 B** | |
+| 极简（再 + 子项 4 / 标题 16） | **3,382 B** | |
+
+单页面成本从 392 B 降到 184 B（默认）或 144 B（极简）。
+
+| 项 | 默认 | 说明 |
+|---|---|---|
+| 菜单池 32 × `sizeof(astra_menu)` | 5,888 | `sizeof` = 184 |
+| Logo 星星（`LOGO_STARS_MAX`） | 432 | 16 颗时 220 |
+| `hal_default_print_info` 缓存 | 384 | 2×24 时 48 |
+| `astra_ui_config()` 实例 | 200 | 无法裁剪 |
+| 其它（单例、标志） | ~21 | |
+
+**`sizeof(astra_menu)` ≈ 24 + 4×`ASTRA_MENU_MAX_CHILDREN` + `ASTRA_TITLE_MAX`**，
+因为指针 4 字节、`float` 4 字节。应用侧的 `astra_selector`(48) 与
+`astra_camera`(20) 由调用方提供存储，不在框架的 `.bss` 里。
+
+### 16.2 可裁剪的宏
+
+全部可在构建时覆盖，无需改源码：
+
+```bat
+cmake -S Inc/astra -B build ^
+      -DASTRA_MENU_POOL_SIZE=20 ^
+      -DASTRA_MENU_MAX_CHILDREN=4 ^
+      -DASTRA_TITLE_MAX=16 ^
+      -DLOGO_STARS_MAX=16 ^
+      -DASTRA_PRINT_LINES=2 -DASTRA_PRINT_COLS=24
+```
+
+| 宏 | 默认 | 影响 | 注意 |
+|---|---|---|---|
+| `ASTRA_MENU_POOL_SIZE` | 32 | 池槽数 × `sizeof(astra_menu)` | 不能小于实际建树页面数，否则 `astra_menu_create()` 返回 `NULL` |
+| `ASTRA_MENU_MAX_CHILDREN` | 8 | 每页 4 B | 不能小于最宽页面的子项数 |
+| `ASTRA_TITLE_MAX` | 24 | 每页 1 B | 超长标题会被 `snprintf` 截断 |
+| `LOGO_STARS_MAX` | 32 | 每颗 12 B | `config.logo_star_num` 默认 16，设 16 即可 |
+| `ASTRA_PRINT_LINES` / `_COLS` | 8 / 48 | 两者相乘 | 只在用 `hal_print_info()` 时有意义 |
+| `hal_vbuf` 画布 | 按面板 | `w*h/8` | 用 `hal_vbuf_init_static()` 可完全静态 |
+
+### 16.3 无堆
+
+框架核心**不分配堆内存**。`hal_vbuf_create()` 是唯一会 `malloc` 的路径
+（实例 96 B + 画布）；MCU 上用 `hal_vbuf_init_static()` 换成静态数组，
+连 `malloc` 实现都可以不链接。
+
+### 16.4 每帧绘制量
 
 一帧大约是：
 
@@ -1352,7 +1396,7 @@ hal_inject(&f.base);
 在 STM32F103（72 MHz）上，纯 GPIO 位操作即可跑到 30+ FPS；
 瓶颈通常在 `canvas_update()` 的 I2C 传输（1024 B @ 400 kHz ≈ 23 ms）。
 
-### 优化建议
+### 16.5 优化建议
 
 1. **`canvas_update()` 只发变化页**：记录脏页范围，只传改动的 page。
 2. **I2C 用 DMA**：把 23 ms 的阻塞传输变成后台进行。
@@ -1360,6 +1404,9 @@ hal_inject(&f.base);
    比逐像素快约 8 倍。
 4. **字号只保留实际用到的**：`get_font_width` 每次调用都会遍历字符串，
    列表选择框每帧都会调用它——如果性能敏感，可在菜单里缓存宽度。
+5. **软浮点**：Cortex-M0/M3 没有 FPU，框架的 `float` 坐标与插值全部走
+   `__aeabi_*` 软浮点，约占 1~3 KB Flash。想彻底避免需要把坐标改成定点
+   （`int16_t`），属于框架级改动。
 
 ---
 

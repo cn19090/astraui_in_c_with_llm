@@ -256,18 +256,37 @@ astra_config_fit_to_screen(astra_ui_config(), sys->screen_weight, sys->screen_he
 该函数在 128×64 上是空操作（缩放系数为 1 时直接返回），因此可以无条件调用。
 细节见 [`docs/hal.md`](docs/hal.md) 第 2 章「分辨率与配置」。
 
-## 容量与裁剪
+## 容量与内存占用
 
-全部在 [`include/astra_types.h`](include/astra_types.h)：
+五个宏决定静态内存（都在构建时可覆盖，无需改源码）：
 
 ```c
 #define ASTRA_MENU_POOL_SIZE     32   /* 页面对象总数   */
 #define ASTRA_MENU_MAX_CHILDREN   8   /* 单页最多子项   */
 #define ASTRA_TITLE_MAX          24   /* 标题字节数     */
+#define LOGO_STARS_MAX           32   /* 开机星星上限   */
+#define ASTRA_PRINT_LINES/COLS  8/48  /* 日志缓存       */
 ```
 
-超出时 `astra_menu_create()` 返回 `NULL`、`astra_menu_add_item()` 返回 `false`，
+实测静态 RAM（含 vbuf 后端，不含画布）：
+
+| 配置 | 静态 RAM | 单页面 |
+|---|---|---|
+| 默认 | 6,925 B | 184 B |
+| F103 推荐（池 20、星星 16、print 2×24） | 4,182 B | 184 B |
+| 极简（再 + 子项 4、标题 16） | 3,382 B | 144 B |
+
+```bat
+cmake -S Inc/astra -B build -DASTRA_MENU_POOL_SIZE=20 -DLOGO_STARS_MAX=16
+```
+
+超出容量时 `astra_menu_create()` 返回 `NULL`、`astra_menu_add_item()` 返回 `false`，
 不会静默截断或越界。内存占用在编译期完全确定（池是静态数组）。
+
+页面**不缓存**配置：每次 render 直接读 `astra_ui_config()` 与
+`hal_system_config_or_default()`。早期版本每页面内嵌一份 200 B 的
+`astra_config`，32 槽就是 6.4 KB 浪费——这是当前版本最大的一处省内存改动。
+详见 [`docs/hal.md`](docs/hal.md) 第 16 章「内存预算」。
 
 ## 动画节奏
 

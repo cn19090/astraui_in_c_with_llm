@@ -263,4 +263,9 @@ static inline void hal_set_system_config(astra_sys_config cfg) {
   hal_get()->config = cfg;
 }
 
+/* Same value, but safe before hal_inject(): returns the 128x64 default instead
+   of dereferencing a NULL singleton. The framework reads screen geometry
+   through this so pages and cameras never cache a stale copy. */
+const astra_sys_config *hal_system_config_or_default(void);
+
 #endif /* ASTRA_HAL_H_ */

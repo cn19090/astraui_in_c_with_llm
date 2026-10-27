@@ -15,7 +15,12 @@
 #include "hal.h"
 #include "item.h"
 
+/* Logo star count is the only large static array in logo.c; the default
+   drawing count (config->logo_star_num) is 16, so 16 is the natural ceiling on
+   a small MCU. */
+#ifndef LOGO_STARS_MAX
 #define LOGO_STARS_MAX 32
+#endif
 
 void astra_draw_logo(uint16_t time_frames) {
   static bool on_render = true;
