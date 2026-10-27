@@ -21,32 +21,35 @@
    A page costs sizeof(astra_menu), which is dominated by
    children[ASTRA_MENU_MAX_CHILDREN] and title[ASTRA_TITLE_MAX]. */
 #ifndef ASTRA_MENU_MAX_CHILDREN
-#define ASTRA_MENU_MAX_CHILDREN 8
+#define ASTRA_MENU_MAX_CHILDREN 4
 #endif
 
 #ifndef ASTRA_TITLE_MAX
-#define ASTRA_TITLE_MAX 24
+#define ASTRA_TITLE_MAX 16
 #endif
 
 #ifndef ASTRA_MENU_POOL_SIZE
-#define ASTRA_MENU_POOL_SIZE 32
+#define ASTRA_MENU_POOL_SIZE 20
 #endif
 
 /* A 2D point/offset, returned by value by the camera and selector getters. */
-typedef struct astra_vec2 {
+typedef struct astra_vec2
+{
   float x;
   float y;
 } astra_vec2;
 
 /* Replaces sys::config (hal.h). */
-typedef struct astra_sys_config {
+typedef struct astra_sys_config
+{
   uint16_t screen_weight; /* width in pixels; the name is historical */
   uint16_t screen_height;
   float screen_bright;
 } astra_sys_config;
 
 /* Replaces astra::config (config.h). */
-typedef struct astra_config {
+typedef struct astra_config
+{
   float tile_animation_speed;
   float list_animation_speed;
   float selector_y_animation_speed;
@@ -87,8 +90,8 @@ typedef struct astra_config {
   float tile_bar_height;
   float tile_select_box_line_length;
   float tile_select_box_margin;
-  float tile_select_box_width; /* derived: margin * 2 + pic width  */
-  float tile_select_box_height;/* derived: margin * 2 + pic height */
+  float tile_select_box_width;  /* derived: margin * 2 + pic width  */
+  float tile_select_box_height; /* derived: margin * 2 + pic height */
   float tile_title_height;
   float tile_btn_margin;
 

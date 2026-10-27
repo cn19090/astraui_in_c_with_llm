@@ -6,21 +6,22 @@
 #include <math.h>
 #include <string.h>
 
-astra_config astra_config_default(void) {
+astra_config astra_config_default(void)
+{
   astra_config c;
   memset(&c, 0, sizeof(c));
 
   c.tile_animation_speed = 80.0f;
-  c.list_animation_speed = 65.0f;
-  c.selector_y_animation_speed = 52.0f;
-  c.selector_x_animation_speed = 70.0f;
-  c.selector_width_animation_speed = 70.0f;
-  c.selector_height_animation_speed = 55.0f;
-  c.window_animation_speed = 25.0f;
-  c.side_bar_animation_speed = 15.0f;
+  c.list_animation_speed = 95.0f;
+  c.selector_y_animation_speed = 95.0f;
+  c.selector_x_animation_speed = 95.0f;
+  c.selector_width_animation_speed = 95.0f;
+  c.selector_height_animation_speed = 95.0f;
+  c.window_animation_speed = 90.0f;
+  c.side_bar_animation_speed = 60.0f;
   c.fade_animation_speed = 100.0f;
-  c.camera_animation_speed = 80.0f;
-  c.logo_animation_speed = 70.0f;
+  c.camera_animation_speed = 92.0f;
+  c.logo_animation_speed = 95.0f;
 
   c.tile_unfold = true;
   c.list_unfold = true;
@@ -72,7 +73,8 @@ astra_config astra_config_default(void) {
   return c;
 }
 
-astra_sys_config astra_sys_config_default(void) {
+astra_sys_config astra_sys_config_default(void)
+{
   astra_sys_config c;
   c.screen_weight = 128;
   c.screen_height = 64;
@@ -80,18 +82,21 @@ astra_sys_config astra_sys_config_default(void) {
   return c;
 }
 
-astra_config *astra_ui_config(void) {
+astra_config *astra_ui_config(void)
+{
   static astra_config s_config;
   static bool s_ready;
 
-  if (!s_ready) {
+  if (!s_ready)
+  {
     s_config = astra_config_default();
     s_ready = true;
   }
   return &s_config;
 }
 
-void astra_ui_config_reset(void) {
+void astra_ui_config_reset(void)
+{
   *astra_ui_config() = astra_config_default();
 }
 
@@ -101,23 +106,30 @@ void astra_ui_config_reset(void) {
 
 /* Scale a length and keep a minimum, rounding to whole pixels so boxes stay
    crisp. */
-static float scale_len(float value, float factor, float minimum) {
+static float scale_len(float value, float factor, float minimum)
+{
   float scaled = roundf(value * factor);
-  if (scaled < minimum) scaled = minimum;
+  if (scaled < minimum)
+    scaled = minimum;
   return scaled;
 }
 
 void astra_config_fit_to_screen(astra_config *cfg, uint16_t width,
-                                uint16_t height) {
-  if (cfg == NULL || width == 0 || height == 0) return;
+                                uint16_t height)
+{
+  if (cfg == NULL || width == 0 || height == 0)
+    return;
 
-  const float sx = (float) width / 128.0f;
-  const float sy = (float) height / 64.0f;
+  const float sx = (float)width / 128.0f;
+  const float sy = (float)height / 64.0f;
   float f = sx < sy ? sx : sy;
 
-  if (f < 0.4f) f = 0.4f;
-  if (f > 3.0f) f = 3.0f;
-  if (f == 1.0f) return; /* reference geometry: nothing to do */
+  if (f < 0.4f)
+    f = 0.4f;
+  if (f > 3.0f)
+    f = 3.0f;
+  if (f == 1.0f)
+    return; /* reference geometry: nothing to do */
 
   /* List page. Text height is left to the backend's font size, but the row
      pitch and margins follow the panel. */

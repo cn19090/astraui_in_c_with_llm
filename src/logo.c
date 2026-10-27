@@ -19,7 +19,7 @@
    drawing count (config->logo_star_num) is 16, so 16 is the natural ceiling on
    a small MCU. */
 #ifndef LOGO_STARS_MAX
-#define LOGO_STARS_MAX 32
+#define LOGO_STARS_MAX 16
 #endif
 
 void astra_draw_logo(uint16_t time_frames) {
