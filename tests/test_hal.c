@@ -262,9 +262,9 @@ static void test_camera_basics(void) {
   astra_vec2 pos = astra_camera_position(&cam);
   CHECK(pos.x == -10.0f && pos.y == -20.0f);
 
-  /* (0,0) is inside the 128x64 viewport, (200,0) is outside to the right. */
+  /* (0,0) is inside the viewport; a far-right x is outside to the right. */
   CHECK(astra_camera_out_of_view(&cam, 10.0f, 20.0f) == 0);
-  CHECK(astra_camera_out_of_view(&cam, 1000.0f, 20.0f) == 2);
+  CHECK(astra_camera_out_of_view(&cam, ASTRA_PANEL_WIDTH + 100.0f, 20.0f) == 2);
 
   printf("ok  camera offsets and viewport test\n");
 }
@@ -358,14 +358,16 @@ static void test_default_config(void) {
   astra_config c = astra_config_default();
 
   CHECK(c.tile_animation_speed == 80.0f);
-  CHECK(c.list_line_height == 16.0f);
+  /* 行高由面板决定：必须是"放得下字 + 至少 3 行"。 */
+  CHECK(c.list_line_height >= c.list_text_height);
+  CHECK((float) ASTRA_PANEL_HEIGHT / c.list_line_height >= 3.0f);
   CHECK(c.tile_select_box_width ==
         c.tile_select_box_margin * 2.0f + c.tile_pic_width);
   CHECK(c.tile_unfold == true);
 
   astra_sys_config s = astra_sys_config_default();
-  CHECK(s.screen_weight == 128);
-  CHECK(s.screen_height == 64);
+  CHECK(s.screen_weight == ASTRA_PANEL_WIDTH);
+  CHECK(s.screen_height == ASTRA_PANEL_HEIGHT);
 
   printf("ok  factory defaults are populated (not zeroed)\n");
 }

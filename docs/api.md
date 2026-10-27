@@ -7,7 +7,7 @@
 > `astra::menu` → `astra_menu`、`astra::selector` → `astra_selector`、
 > `astra::camera` → `astra_camera`、`astra::launcher` → `astra_launcher`。
 > 语言层面的差异（虚函数 → `hal_ops` 函数指针表、动态容器 → 静态池、
-> 编译期分辨率 → 运行期配置）见 [../README.md](../README.md#与上游-astra-ui-的关系)。
+> 面板选择改为编译期宏）见 [../README.md](../README.md#与上游-astra-ui-的关系)。
 
 - [1. 头文件与包含顺序](#1-头文件与包含顺序)
 - [2. 数据类型](#2-数据类型)
@@ -78,12 +78,9 @@ typedef struct astra_sys_config {
 } astra_sys_config;
 ```
 
-这两个值是**运行期数据**：框架每帧的布局、相机、弹窗都按它们计算，
-所以后端换分辨率后无需改框架代码。类型是 `uint16_t`，
-因此 128x64、256x64、64x48 等尺寸都只是"一个数值"。
-
-**注意**：改它们必须同时让后端缓冲区匹配——正确做法是通过后端的配置结构
-（如 `hal_raylib_config`）在创建时设定，见 [hal.md](hal.md#2-分辨率与配置)。
+框架每帧的布局、相机、弹窗都按这两个值计算，所以后端只要如实报告几何，
+框架代码就不用改。尺寸由 `ASTRA_PANEL` 在编译期固定（见 [hal.md](hal.md#2-面板选择)），
+后端在 `create` 时把它们写进 `hal.config` 即可。
 
 ### 2.3 枚举
 
@@ -125,31 +122,28 @@ astra_config     *astra_ui_config(void);           /* 全局唯一实例     */
 void              astra_ui_config_reset(void);     /* 恢复默认         */
 astra_sys_config *hal_system_config(void);         /* HAL 持有的屏幕配置 */
 
-/* 按面板尺寸缩放整套排版参数（见下方"多分辨率"） */
-void astra_config_fit_to_screen(astra_config *cfg, uint16_t width,
-                                uint16_t height);
+### 面板选择（编译期）
+
+排版不再有"按比例缩放"这一步。面板由 `include/astra_panel.h` 的 `ASTRA_PANEL`
+在编译期选定，`astra_config_default()` 按它返回**手调好的一整套数值**：
+
+```bash
+cmake -S . -B build -DASTRA_PANEL=ASTRA_PANEL_128x128
 ```
 
-### 多分辨率
+| 宏 | 面板 | 画布 | 内置字体 |
+|---|---|---|---|
+| `ASTRA_PANEL_128x64` | 128×64 | 1024 B | 6×12 |
+| `ASTRA_PANEL_128x32` | 128×32 | 512 B | 5×8 |
+| `ASTRA_PANEL_128x128` | 128×128 | 2048 B | 8×16 |
+| `ASTRA_PANEL_240x240` | 240×240 | 7200 B | 12×24 |
 
-默认排版是按 128x64 调的。换屏时用一行调用即可按比例适配：
+为什么不缩放：行距、边距、图标放大倍数都是整数像素，`round(16 * 0.5) = 8`
+和手工挑的 10 差两像素——在 1bpp 屏上就是"字压线"。所以每种面板配一套数字，
+代码相同，数值不同。新增面板见 [`hal.md`](hal.md#2-面板选择)。
 
-```c
-astra_config *ui = astra_ui_config();
-astra_config_fit_to_screen(ui, hal_system_config()->screen_weight,
-                               hal_system_config()->screen_height);
-```
-
-规则：
-
-- 缩放因子 `min(width/128, height/64)`，钳制到 `[0.4, 3.0]`
-- 128x64 时**不改动任何字段**（参考尺寸像素级不变）
-- 缩放行高、边距、选择框、虚线、圆角、Logo 尺寸
-- **不缩放 `tile_pic_width/height`**（那是位图素材尺寸，改了会读错位图行宽）
-- 必须在 `astra_menu_create*()` **之前**调用：子项目标坐标在 `add_item()` 时算出
-
-字号不归这里管，它由后端决定（`hal_get_font_height()`）。
-若后端字号与 `list_text_height` 不一致，请自行同步，否则列表文字会裁切：
+字号由后端决定（`hal_get_font_height()`）。示例应用仍会把行高抬到
+至少「字号 + 边距」，避免选到行高偏紧的面板时文字挤出选择框：
 
 ```c
 ui->list_text_height = (float) hal_get_font_height();
@@ -157,8 +151,8 @@ if (ui->list_line_height < ui->list_text_height + ui->list_text_margin)
     ui->list_line_height = ui->list_text_height + ui->list_text_margin;
 ```
 
-`astra_menu_create*()` 会用**当前**配置初始化页面，所以校准后再建菜单即可生效。
-
+绘制时的垂直定位一律按 `hal_get_font_height()` 现算，所以后端换字号后即使忘了
+同步这一项，文字仍然居中，只是行高可能偏紧。
 
 ### `astra_config` 字段
 
@@ -194,12 +188,15 @@ if (ui->list_line_height < ui->list_text_height + ui->list_text_margin)
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `list_line_height` | 16 | 行高，决定每屏行数 |
-| `list_text_height` | 8 | 文字高度 |
-| `list_text_margin` | 4 | 文字左边距 |
+| `list_text_height` | 8 | 文字高度（默认值；实际绘制按 `hal_get_font_height()` 居中） |
+| `list_text_margin` | 4 | 文字**左边距**（不参与垂直定位） |
 | `list_bar_weight` | 5 | 右侧滚动条宽度 |
 | `selector_margin` | 4 | 选择框与文字左边距 |
 | `selector_radius` | 0.5 | 选择框圆角 |
 | `list_page_turning_mode` | 1 | `0` 整页翻页，`1` 逐行滚动 |
+
+列表文字垂直位置由框架自动算：基线 = `行顶 + (list_line_height + 字体高) / 2`，
+即文字单元格在行高内居中，与同高的选择框对齐。`list_text_margin` 只影响水平位置。
 
 #### 磁贴布局
 
@@ -252,7 +249,7 @@ astra_menu *astra_menu_create_tile(const char *title, const uint8_t *pic);
 ```
 
 页面用**当前**的 `astra_ui_config()` / `hal_system_config()` 初始化，
-因此在校准配置（如 `astra_config_fit_to_screen`）之后创建就能生效。
+因此在调整 `astra_ui_config()` 之后创建就能生效。
 
 | | `astra_menu_create` | `astra_menu_create_tile` |
 |---|---|---|
@@ -585,23 +582,18 @@ void astra_demo_back(void);                    /* 返回上级（可选）  */
 
 `astra_demo_update()` 必须在 `astra_demo_init()` 之后调用（它不重复检查 HAL）。
 
-### 固定 128x64
+### 示例应用
 
-这个示例按 **128x64** 手工排版，不做分辨率适配，初始化流程固定为：
+这个示例的排版完全由 `ASTRA_PANEL` 决定，初始化流程与面板无关：
 
 1. `astra_ui_config_reset()` 回到出厂排版（避免反复 init 累积改动）
-2. 设 `logo_animation_speed = 88`
-3. 用 `hal_get_font_height()` 校正 `list_text_height`，并把
-   `list_line_height` 设为 `字号 + 上边距`
-4. 建根页面 + 4 个磁贴页（图标 30x30，128x64 放得下）
+2. 设 `logo_animation_speed`
+3. 用 `hal_get_font_height()` 校正 `list_text_height`，行高不足时抬到
+   `字号 + 边距`
+4. 按 `ASTRA_PANEL_ICON_SCALE` 放大 30×30 主图，建根页面 + 4 个磁贴页；
+   `ASTRA_PANEL_HAS_TILES == 0` 的面板改建成列表页
 
-换屏时需要自己调 `astra_config` 的间距，或改用通用做法：
-
-```c
-astra_config_fit_to_screen(astra_ui_config(), sys->screen_weight, sys->screen_height);
-```
-
-该函数在 128x64 上是空操作（缩放系数为 1 时直接返回）。
+换面板只需换 `ASTRA_PANEL` 重新编译，不需要改任何间距。
 
 ### 内置输入策略
 
@@ -656,7 +648,7 @@ astra_demo_update();
 | 后端实例 | 由后端 `*_create()` 决定（raylib 后端用 `calloc`） |
 
 框架核心**不分配堆内存**。页面池是整体复用的，所以 `open()` / `close()`
-不产生分配或释放。后端的画布与像素缓冲随分辨率变化，由后端自己管理。
+不产生分配或释放。后端的画布大小由面板决定，由后端自己管理。
 
 ### 推荐启动 / 关闭顺序
 
@@ -675,10 +667,6 @@ int main(void) {
     /* 2. 注入后端 —— 必须在任何 hal_* 调用之前 */
     hal_inject(hal_raylib_create_with(&dev));
 
-    /* 3. 把排版适配到实际面板（可选；128x64 上是空操作） */
-    astra_config_fit_to_screen(astra_ui_config(),
-                               hal_system_config()->screen_weight,
-                               hal_system_config()->screen_height);
 
     /* 4. 建菜单并启动 */
     astra_menu_pool_reset();

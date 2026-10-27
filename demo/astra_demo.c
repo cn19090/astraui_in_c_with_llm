@@ -1,12 +1,13 @@
 //
-// astra demo: 固定 128x64 的示例应用。
+// astra demo: 随面板自动适配的示例应用。
 //
 // 只依赖 astra 的 HAL，不包含任何平台头文件，所以同一份代码可以跑在
 // raylib、SDL、SSD1306 或测试桩上。
 //
-// 本示例假定面板就是 128x64（SSD1306），布局按这个尺寸手工核对；
-// 换成别的分辨率需要自行调整 config 里的间距，或改用
-// astra_config_fit_to_screen()。
+// 布局完全由 astra_panel.h 决定（宏 ASTRA_PANEL）：
+//   - 面板够高时用磁贴页作根菜单，否则退化为列表页；
+//   - 磁贴图标由 30x30 主图按 ASTRA_PANEL_ICON_SCALE 整数放大，
+//     保证在大屏上不会变成一个小点。
 //
 // astra 是 astra UI（C++）的 C99 移植版本，上游：
 //   https://github.com/AstraThreshold/oled-ui-astra
@@ -17,6 +18,7 @@
 #include <string.h>
 
 #include "astra_config.h"
+#include "astra_panel.h"
 #include "hal.h"
 #include "item.h"
 #include "launcher.h"
@@ -30,6 +32,11 @@
 
 /* 开机 Logo 的推进帧数：60 FPS 下约 1.8 秒。 */
 #define LOGO_FRAMES 110
+
+/* 磁贴主图的尺寸（所有分辨率的素材都用这一套）。 */
+#define ICON_SRC_W 30
+#define ICON_SRC_H 30
+#define ICON_SRC_BYTES (ICON_SRC_W * ICON_SRC_H / 8)
 
 /* ------------------------------------------------------------------------ */
 /* 磁贴图标：30x30 像素，每行 4 字节，MSB 是最左边的像素，1 表示点亮。
@@ -81,6 +88,54 @@ static const uint8_t PIC_ABOUT[120] = {
     0xC0, 0xFF, 0xFF, 0xC0, 0x80, 0xFF, 0x7F, 0xC0, 0x00, 0xF3, 0x33, 0xC0,
     0x00, 0xE0, 0x01, 0xC0, 0x00, 0xE0, 0x01, 0xC0, 0x00, 0x00, 0x00, 0xC0,
     0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0xC0};
+
+/* ------------------------------------------------------------------------ */
+/* 磁贴图标：按面板放大                                                       */
+/* ------------------------------------------------------------------------ */
+
+/* 目标尺寸 = 主图 × 整数倍。框架把 tile_pic_width/height 同时当作源位图尺寸
+   和目标尺寸（draw_bmp 用它算行宽），所以放大的结果必须真的是一张这么大的
+   位图。这里启动时把 30x30 主图按整像素块展开一次，之后每帧直接整块贴。 */
+#define ICON_DST_W (ICON_SRC_W * ASTRA_PANEL_ICON_SCALE)
+#define ICON_DST_H (ICON_SRC_H * ASTRA_PANEL_ICON_SCALE)
+#define ICON_DST_BYTES (ICON_DST_W * ICON_DST_H / 8)
+
+#if ASTRA_PANEL_HAS_TILES
+static uint8_t s_icon_system[ICON_DST_BYTES];
+static uint8_t s_icon_display[ICON_DST_BYTES];
+static uint8_t s_icon_network[ICON_DST_BYTES];
+static uint8_t s_icon_about[ICON_DST_BYTES];
+
+static void icon_scale_up(const uint8_t *src, uint8_t *dst)
+{
+#if ASTRA_PANEL_ICON_SCALE == 1
+  memcpy(dst, src, ICON_SRC_BYTES);
+#else
+  const int dst_stride = ICON_DST_W / 8;
+  memset(dst, 0, ICON_DST_BYTES);
+
+  for (int sy = 0; sy < ICON_SRC_H; ++sy)
+  {
+    const uint8_t *row = src + sy * (ICON_SRC_W / 8);
+    for (int sx = 0; sx < ICON_SRC_W; ++sx)
+    {
+      if (((row[sx / 8] >> (7 - (sx % 8))) & 1u) == 0) continue;
+
+      /* one source pixel -> a solid SCALE x SCALE block */
+      for (int dy = 0; dy < ASTRA_PANEL_ICON_SCALE; ++dy)
+      {
+        uint8_t *out = dst + (sy * ASTRA_PANEL_ICON_SCALE + dy) * dst_stride;
+        for (int dx = 0; dx < ASTRA_PANEL_ICON_SCALE; ++dx)
+        {
+          const int x = sx * ASTRA_PANEL_ICON_SCALE + dx;
+          out[x / 8] |= (uint8_t)(0x80u >> (x % 8));
+        }
+      }
+    }
+  }
+#endif
+}
+#endif /* ASTRA_PANEL_HAS_TILES */
 
 /* ------------------------------------------------------------------------ */
 /* 应用状态                                                                  */
@@ -214,7 +269,8 @@ bool astra_demo_init(void)
   /* 步骤 4：行高跟随后端真实字号，否则文字会被裁掉或互相压住：
      list_text_height 是文字高度，list_line_height 是行间距（行距 >= 字高 + 边距）。 */
   ui->list_text_height = (float)hal_get_font_height();
-  ui->list_line_height = ui->list_text_height + ui->list_text_margin;
+  if (ui->list_line_height < ui->list_text_height + ui->list_text_margin)
+    ui->list_line_height = ui->list_text_height + ui->list_text_margin;
 
   /* 步骤 5：清空按键历史，避免把上一次运行残留的电平当成一次按下。 */
   memset(s_key_down, 0, sizeof(s_key_down));
@@ -237,19 +293,33 @@ bool astra_demo_init(void)
   if (s_root == NULL)
     return false;
 
-  /* 步骤 10：建四个磁贴页（128x64 放得下图标 + 标题）。 */
-  astra_menu *system_page = astra_menu_create_tile("System", PIC_SYSTEM);
-  astra_menu *display_page = astra_menu_create_tile("Display", PIC_DISPLAY);
-  astra_menu *network_page = astra_menu_create_tile("Network", PIC_NETWORK);
-  astra_menu *about_page = astra_menu_create_tile("About", PIC_ABOUT);
+#if ASTRA_PANEL_HAS_TILES
+  /* 步骤 10：把 30x30 主图按面板整数放大，尺寸与 config 里的 tile_pic_* 一致。 */
+  icon_scale_up(PIC_SYSTEM, s_icon_system);
+  icon_scale_up(PIC_DISPLAY, s_icon_display);
+  icon_scale_up(PIC_NETWORK, s_icon_network);
+  icon_scale_up(PIC_ABOUT, s_icon_about);
 
-  /* 步骤 11：把四个磁贴挂到根页面。 */
+  /* 步骤 11：建四个磁贴页。 */
+  astra_menu *system_page = astra_menu_create_tile("System", s_icon_system);
+  astra_menu *display_page = astra_menu_create_tile("Display", s_icon_display);
+  astra_menu *network_page = astra_menu_create_tile("Network", s_icon_network);
+  astra_menu *about_page = astra_menu_create_tile("About", s_icon_about);
+#else
+  /* 步骤 11：面板太矮，装不下图标 + 标题，根菜单直接用列表页。 */
+  astra_menu *system_page = astra_menu_create("System");
+  astra_menu *display_page = astra_menu_create("Display");
+  astra_menu *network_page = astra_menu_create("Network");
+  astra_menu *about_page = astra_menu_create("About");
+#endif
+
+  /* 步骤 12：把四个入口挂到根页面。 */
   astra_menu_add_item(s_root, system_page);
   astra_menu_add_item(s_root, display_page);
   astra_menu_add_item(s_root, network_page);
   astra_menu_add_item(s_root, about_page);
 
-  /* 步骤 12：给每个磁贴页填子项。 */
+  /* 步骤 13：给每个页面填子项。 */
   astra_menu_add_item(system_page, astra_menu_create("Brightness"));
   astra_menu_add_item(system_page, astra_menu_create("Volume"));
   astra_menu_add_item(system_page, astra_menu_create("Sleep Mode"));
@@ -267,7 +337,7 @@ bool astra_demo_init(void)
   astra_menu_add_item(about_page, astra_menu_create("Version 1.0"));
   astra_menu_add_item(about_page, astra_menu_create("C99"));
 
-  /* 步骤 13：把根页面、选择器和相机交给 launcher，开始可以渲染。 */
+  /* 步骤 14：把根页面、选择器和相机交给 launcher，开始可以渲染。 */
   astra_launcher_init(&s_launcher, s_root, &s_selector, &s_camera);
   return true;
 }

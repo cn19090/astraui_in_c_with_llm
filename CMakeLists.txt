@@ -51,6 +51,20 @@ target_include_directories(astra PUBLIC
 #
 # Defaults match the upstream layout; lower them on a small MCU.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Panel selection: the single compile-time switch that fixes the canvas size.
+#
+#   ASTRA_PANEL_128x64   (default)   1024 B canvas
+#   ASTRA_PANEL_128x32                512 B canvas
+#   ASTRA_PANEL_128x128              2048 B canvas
+#   ASTRA_PANEL_240x240              7200 B canvas
+#
+#   cmake -S Inc/astra -B build -DASTRA_PANEL=ASTRA_PANEL_128x128
+# ---------------------------------------------------------------------------
+set(ASTRA_PANEL "ASTRA_PANEL_128x64" CACHE STRING "Target OLED panel")
+set_property(CACHE ASTRA_PANEL PROPERTY STRINGS
+    ASTRA_PANEL_128x64 ASTRA_PANEL_128x32 ASTRA_PANEL_128x128 ASTRA_PANEL_240x240)
+
 set(ASTRA_MENU_POOL_SIZE 32 CACHE STRING "Number of page objects (pool size)")
 set(ASTRA_MENU_MAX_CHILDREN 8 CACHE STRING "Max children per page")
 set(ASTRA_TITLE_MAX 24 CACHE STRING "Title buffer size in bytes")
@@ -59,6 +73,7 @@ set(ASTRA_PRINT_LINES 8 CACHE STRING "hal_default_print_info cache lines")
 set(ASTRA_PRINT_COLS 48 CACHE STRING "hal_default_print_info bytes per line")
 
 target_compile_definitions(astra PUBLIC
+    ASTRA_PANEL=${ASTRA_PANEL}
     ASTRA_MENU_POOL_SIZE=${ASTRA_MENU_POOL_SIZE}
     ASTRA_MENU_MAX_CHILDREN=${ASTRA_MENU_MAX_CHILDREN}
     ASTRA_TITLE_MAX=${ASTRA_TITLE_MAX}

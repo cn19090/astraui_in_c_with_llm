@@ -7,7 +7,7 @@
 > 上游本体仓库：<https://github.com/AstraThreshold/oled-ui-astra>（C++，作者 dcfsswindy
 > 及社区贡献者）。界面形态、页面结构、动画参数与视觉比例均以上游为准；本工程保留
 > 同一套 API 语义，把 C++ 的类继承与虚函数改写为 C 的函数指针表（`hal_ops`）与扁平化
-> 结构体，并把显示分辨率从编译期常量改为运行期数据。上游的许可与致谢同样适用于本工程。
+> 结构体。面板尺寸用编译期宏 `ASTRA_PANEL` 选定，每种常见尺寸配一套手调排版。
 
 框架本身**不含一行平台代码**：所有绘制与计时都经一张可替换的函数指针表
 （HAL）转发。因此同一份框架代码可以跑在 SSD1306、raylib 窗口、SDL 或纯内存
@@ -34,7 +34,7 @@
 
 - **纯 C99**，除后端外无外部依赖（只用 `<stdint.h>` `<stdbool.h>` `<string.h>` `<math.h>`）
 - **自带两种后端**：`hal_vbuf`（纯内存，零依赖，你负责刷新）与你自己实现的硬件后端
-- **分辨率是运行期数据**：面板尺寸由后端在初始化时报告，框架据此自适应布局
+- **面板在编译期选定**：`ASTRA_PANEL` 一个宏同时决定尺寸、字体与整套排版数值
 - **零堆分配**：界面对象全部来自固定大小的静态池
 - **两种页面**：磁贴页（图标 + 横向滚动）与列表页（文字 + 纵向滚动）
 - **内建动画**：页面进出、选择框补间、相机平滑滚动、开机 Logo
@@ -117,7 +117,7 @@ Inc\astra\build\Debug\astra_test_hal.exe
 ```c
 #include "hal_vbuf.h"
 
-hal_inject(hal_vbuf_create(NULL));       /* NULL => 128x64 */
+hal_inject(hal_vbuf_create());           /* 几何来自 ASTRA_PANEL */
 hal_vbuf_set_flush(my_flush, &my_bus);   /* 每帧回调，可选 */
 
 /* ... 运行 UI ... */
@@ -240,20 +240,28 @@ astra_demo_update();
 `docs/hal.md` 里带有 SSD1306（I²C/SPI 位操作）与裸机静态后端的完整代码，可以
 直接作为移植起点。
 
-## 分辨率与布局
+## 面板选择与布局
 
-框架从 `hal_system_config()` 读取后端报告的 `screen_weight` / `screen_height`，
-所有布局参数集中在 `astra_ui_config()` 返回的 `astra_config` 里。
+面板尺寸是**编译期常量**，由 `include/astra_panel.h` 的 `ASTRA_PANEL` 选定：
 
-换一块不同尺寸的屏：
+| 宏 | 分辨率 | 画布 | 内置字体 | 磁贴页 |
+|---|---|---|---|---|
+| `ASTRA_PANEL_128x64` | 128×64 | 1024 B | 6×12 | 有 |
+| `ASTRA_PANEL_128x32` | 128×32 | 512 B | 5×8 | 无（太矮） |
+| `ASTRA_PANEL_128x128` | 128×128 | 2048 B | 8×16 | 有 |
+| `ASTRA_PANEL_240x240` | 240×240 | 7200 B | 12×24 | 有 |
 
-```c
-/* 按面板尺寸等比缩放整套排版参数 */
-astra_config_fit_to_screen(astra_ui_config(), sys->screen_weight, sys->screen_height);
+```bash
+cmake -S Inc/astra -B build -DASTRA_PANEL=ASTRA_PANEL_128x32
 ```
 
-该函数在 128×64 上是空操作（缩放系数为 1 时直接返回），因此可以无条件调用。
-细节见 [`docs/hal.md`](docs/hal.md) 第 2 章「分辨率与配置」。
+每种面板在 `astra_config_default()` 里带一套手调数值（行高、边距、选择框、
+虚线位置、Logo 尺寸、磁贴图标放大倍数），代码完全相同、数字不同。
+
+为什么不做按比例缩放：行距和边距都是整数像素，`round(16 * 0.5) = 8` 与手工挑的
+10 差两像素，在 1bpp 屏上就会"字压线"。所以每种面板配一套数字。
+
+细节见 [`docs/hal.md`](docs/hal.md) 第 2 章「面板选择」。
 
 ## 容量与内存占用
 
@@ -314,7 +322,7 @@ cmake -S Inc/astra -B build -DASTRA_MENU_POOL_SIZE=20 -DLOGO_STARS_MAX=16
 | 框架零平台依赖 | 全部绘制/计时经 HAL 转发；自测目标不链接图形库也能编译运行 |
 | `ops` 表模拟虚函数 | C 里没有虚函数表，函数指针结构体是等效替代 |
 | 后端结构体把 `hal base` 放第一个成员 | 依赖 C 的对象布局保证上下转型安全 |
-| 分辨率是运行期数据 | 后端画布按配置分配；框架读 `hal_system_config()` 自适应布局 |
+| 面板在编译期选定 | 排版常量与位图字体都针对一块面板挑数字，避免缩放取整误差 |
 | 固定容量池 | 无堆、无碎片、内存占用编译期已知 |
 | 位置存"当前值 + 目标值"，每帧插值 | 动画与逻辑解耦，页面代码只描述目标布局 |
 | 相机存负偏移 | 元素坐标保持"页面内绝对坐标"，滚动只是平移 |

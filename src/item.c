@@ -309,12 +309,21 @@ void astra_menu_render(astra_menu *menu, astra_vec2 camera) {
 
     hal_set_draw_type(1);
 
+    /* Vertically centre the text cell inside its row: the selector box spans
+       the whole line height, so the baseline goes half a row plus half a cell
+       below the row top. list_text_margin is a *side* margin only - using it
+       here (as an earlier version did) pushed the text against the bottom of
+       the box. */
+    const float row_h = cfg->list_line_height;
+    const float text_h = (float) hal_get_font_height();
+    float baseline_pad = (row_h + text_h) / 2.0f;
+    if (baseline_pad < text_h) baseline_pad = text_h; /* short rows: no clipping */
+
     /* text (coordinates may exceed the screen; clipping happens in the HAL) */
     for (uint8_t i = 0; i < menu->child_count; ++i) {
       astra_menu *child = menu->children[i];
       hal_draw_chinese(child->position.x + camera.x,
-                       child->position.y + cfg->list_text_height +
-                           cfg->list_text_margin + camera.y,
+                       child->position.y + baseline_pad + camera.y,
                        child->title);
       astra_anim_step(&child->position.y, child->position.y_trg,
                       cfg->list_animation_speed);

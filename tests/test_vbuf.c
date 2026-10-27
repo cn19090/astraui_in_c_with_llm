@@ -52,7 +52,7 @@ typedef struct {
   int calls;
   int width;
   int height;
-  uint8_t last[128 * 64 / 8];
+  uint8_t last[ASTRA_PANEL_CANVAS_BYTES];
 } flush_probe;
 
 static void probe_flush(void *user, const uint8_t *buffer, int width, int height) {
@@ -67,73 +67,30 @@ static void probe_flush(void *user, const uint8_t *buffer, int width, int height
 /* construction and geometry                                                 */
 /* ------------------------------------------------------------------------ */
 
-static void test_default_geometry(void) {
-  hal *h = hal_vbuf_create(NULL);
+static void test_panel_geometry(void) {
+  hal *h = hal_vbuf_create();
   CHECK(h != NULL);
   CHECK(hal_inject(h));
 
   CHECK(strcmp(hal_type(), "VBUF") == 0);
-  CHECK(hal_get_buffer_tile_width() == 16);   /* 128 / 8 */
-  CHECK(hal_get_buffer_tile_height() == 8);   /* 64 / 8  */
-  CHECK(hal_system_config()->screen_weight == 128);
-  CHECK(hal_system_config()->screen_height == 64);
+  CHECK(hal_get_buffer_tile_width() == ASTRA_PANEL_TILE_W);
+  CHECK(hal_get_buffer_tile_height() == ASTRA_PANEL_TILE_H);
+  CHECK(hal_system_config()->screen_weight == ASTRA_PANEL_WIDTH);
+  CHECK(hal_system_config()->screen_height == ASTRA_PANEL_HEIGHT);
   CHECK(hal_get_canvas_buffer() != NULL);
   CHECK(hal_vbuf_canvas() != NULL);
-  CHECK(hal_vbuf_width() == 128);
-  CHECK(hal_vbuf_height() == 64);
-  CHECK(hal_get_font_height() == 12);
+  CHECK(hal_vbuf_width() == ASTRA_PANEL_WIDTH);
+  CHECK(hal_vbuf_height() == ASTRA_PANEL_HEIGHT);
+  CHECK(hal_get_font_height() == ASTRA_VBUF_FONT_H);
+
+  /* The canvas is exactly one page per tile: no slack, no rounding. */
+  CHECK((size_t) ASTRA_PANEL_TILE_W * ASTRA_PANEL_TILE_H * 8u ==
+        (size_t) ASTRA_PANEL_CANVAS_BYTES);
 
   hal_destroy();
-  printf("ok  default geometry is 128x64 with 16x8 tiles\n");
-}
-
-static void test_custom_geometry(void) {
-  hal_vbuf_config cfg;
-  hal_vbuf_config_default(&cfg);
-  CHECK(cfg.width == 128);
-  CHECK(cfg.height == 64);
-
-  cfg.width = 64;
-  cfg.height = 48;
-  hal *h = hal_vbuf_create(&cfg);
-  CHECK(h != NULL);
-  CHECK(hal_inject(h));
-  CHECK(hal_get_buffer_tile_width() == 8);
-  CHECK(hal_get_buffer_tile_height() == 6);
-  CHECK(hal_system_config()->screen_weight == 64);
-  CHECK(hal_system_config()->screen_height == 48);
-  hal_destroy();
-
-  printf("ok  a custom panel size is honoured\n");
-}
-
-static void test_invalid_geometry(void) {
-  hal_vbuf_config cfg;
-
-  hal_vbuf_config_default(&cfg);
-  cfg.width = 100; /* not a multiple of 8 */
-  CHECK(hal_vbuf_create(&cfg) == NULL);
-
-  hal_vbuf_config_default(&cfg);
-  cfg.width = -8;
-  CHECK(hal_vbuf_create(&cfg) == NULL);
-
-  hal_vbuf_config_default(&cfg);
-  cfg.height = 4096; /* beyond the uint8_t tile contract */
-  CHECK(hal_vbuf_create(&cfg) == NULL);
-
-  /* Zeroed fields fall back to the 128x64 default. */
-  hal_vbuf_config_default(&cfg);
-  cfg.width = 0;
-  cfg.height = 0;
-  hal *h = hal_vbuf_create(&cfg);
-  CHECK(h != NULL);
-  CHECK(hal_inject(h));
-  CHECK(hal_vbuf_width() == 128);
-  CHECK(hal_vbuf_height() == 64);
-  hal_destroy();
-
-  printf("ok  invalid panel sizes are rejected, zero falls back\n");
+  printf("ok  panel %s geometry: %d tiles, %d canvas bytes, %d px font\n",
+         ASTRA_PANEL_NAME, ASTRA_PANEL_TILE_W * ASTRA_PANEL_TILE_H,
+         ASTRA_PANEL_CANVAS_BYTES, ASTRA_VBUF_FONT_H);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -141,23 +98,23 @@ static void test_invalid_geometry(void) {
 /* ------------------------------------------------------------------------ */
 
 static void test_canvas_clear_and_layout(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
-  const size_t bytes = 128 * 64 / 8;
+  const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
   CHECK(count_lit(buf, bytes) == 0); /* calloc'd */
 
   hal_set_draw_type(1);
   hal_draw_pixel(0.0f, 0.0f);
-  CHECK(pixel_at(buf, 128, 0, 0));
-  CHECK(!pixel_at(buf, 128, 1, 0));
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 0, 0));
+  CHECK(!pixel_at(buf, ASTRA_PANEL_WIDTH, 1, 0));
   /* Row-major 1bpp: byte 0, bit 7 is the top-left pixel. */
   CHECK(buf[0] == 0x80);
 
   hal_draw_pixel(8.0f, 0.0f); /* first pixel of the next byte */
   CHECK(buf[1] == 0x80);
 
-  hal_draw_pixel(127.0f, 63.0f); /* last pixel of the last page */
+  hal_draw_pixel((float) (ASTRA_PANEL_WIDTH - 1), (float) (ASTRA_PANEL_HEIGHT - 1));
   CHECK(buf[bytes - 1] == 0x01);
 
   hal_canvas_clear();
@@ -168,22 +125,22 @@ static void test_canvas_clear_and_layout(void) {
 }
 
 static void test_draw_type(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
 
   hal_set_draw_type(1);
   hal_draw_pixel(0.0f, 0.0f);
-  CHECK(pixel_at(buf, 128, 0, 0));
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 0, 0));
 
   hal_set_draw_type(0); /* clear mode */
   hal_draw_pixel(0.0f, 0.0f);
-  CHECK(!pixel_at(buf, 128, 0, 0));
+  CHECK(!pixel_at(buf, ASTRA_PANEL_WIDTH, 0, 0));
 
   hal_set_draw_type(1);
   hal_draw_pixel(0.0f, 0.0f);
   hal_set_draw_type(2); /* invert mode */
   hal_draw_pixel(0.0f, 0.0f);
-  CHECK(!pixel_at(buf, 128, 0, 0));
+  CHECK(!pixel_at(buf, ASTRA_PANEL_WIDTH, 0, 0));
 
   hal_set_draw_type(1);
   hal_destroy();
@@ -191,82 +148,84 @@ static void test_draw_type(void) {
 }
 
 static void test_clipping(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
-  const size_t bytes = 128 * 64 / 8;
+  const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
   hal_set_draw_type(1);
   hal_draw_pixel(-5.0f, -5.0f);
   hal_draw_pixel(500.0f, 500.0f);
-  hal_draw_pixel(127.4f, 63.4f); /* rounds to 127,63 -> the last visible pixel */
-  hal_draw_h_line(120.0f, 10.0f, 40.0f); /* runs off the right edge */
-  CHECK(count_lit(buf, bytes) == 9);     /* 1 pixel + x = 120..127 */
+  hal_draw_pixel((float) (ASTRA_PANEL_WIDTH - 1) + 0.4f,
+                 (float) (ASTRA_PANEL_HEIGHT - 1) + 0.4f); /* rounds onto the last pixel */
+  hal_draw_h_line((float) (ASTRA_PANEL_WIDTH - 8), 10.0f,
+                  40.0f); /* 只有最后 8 个像素落在屏内 */
+  CHECK(count_lit(buf, bytes) == 9); /* 1 个像素 + x = width-8 .. width-1 */
 
   hal_destroy();
   printf("ok  drawing outside the panel is clipped, not corrupting\n");
 }
 
 static void test_primitives(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
 
   hal_set_draw_type(1);
   hal_draw_box(10.0f, 10.0f, 4.0f, 3.0f);
-  CHECK(pixel_at(buf, 128, 10, 10));
-  CHECK(pixel_at(buf, 128, 13, 12));
-  CHECK(!pixel_at(buf, 128, 14, 12));
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 10, 10));
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 13, 12));
+  CHECK(!pixel_at(buf, ASTRA_PANEL_WIDTH, 14, 12));
 
   hal_canvas_clear();
   hal_draw_frame(10.0f, 10.0f, 4.0f, 4.0f);
-  CHECK(pixel_at(buf, 128, 10, 10));  /* corner */
-  CHECK(pixel_at(buf, 128, 13, 13));  /* corner */
-  CHECK(!pixel_at(buf, 128, 11, 11)); /* hollow */
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 10, 10));  /* corner */
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 13, 13));  /* corner */
+  CHECK(!pixel_at(buf, ASTRA_PANEL_WIDTH, 11, 11)); /* hollow */
 
   hal_canvas_clear();
   hal_draw_h_dotted_line(0.0f, 0.0f, 16.0f);
-  CHECK(!pixel_at(buf, 128, 0, 0)); /* gap  */
-  CHECK(pixel_at(buf, 128, 3, 0));  /* dash */
-  CHECK(!pixel_at(buf, 128, 8, 0)); /* gap  */
+  CHECK(!pixel_at(buf, ASTRA_PANEL_WIDTH, 0, 0)); /* gap  */
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 3, 0));  /* dash */
+  CHECK(!pixel_at(buf, ASTRA_PANEL_WIDTH, 8, 0)); /* gap  */
 
   /* Bitmap: 8 wide, 2 rows, 1 byte per row. */
   static const uint8_t bmp[2] = {0x80, 0x01};
   hal_canvas_clear();
   hal_draw_bmp(0.0f, 0.0f, 8.0f, 2.0f, bmp);
-  CHECK(pixel_at(buf, 128, 0, 0));
-  CHECK(pixel_at(buf, 128, 7, 1));
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 0, 0));
+  CHECK(pixel_at(buf, ASTRA_PANEL_WIDTH, 7, 1));
 
   hal_destroy();
   printf("ok  box/frame/dotted line/bitmap primitives\n");
 }
 
 static void test_text(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
-  const size_t bytes = 128 * 64 / 8;
+  const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
   CHECK(hal_get_font_width("") == 0);
-  CHECK(hal_get_font_width("A") == 6);
-  CHECK(hal_get_font_width("System") == 36);
+  CHECK(hal_get_font_width("A") == ASTRA_VBUF_FONT_W);
+  CHECK(hal_get_font_width("System") == 6 * ASTRA_VBUF_FONT_W);
 
   hal_set_draw_type(1);
-  hal_draw_english(0.0f, 12.0f, "A");
+  hal_draw_english(0.0f, (float) ASTRA_VBUF_FONT_H, "A");
   CHECK(count_lit(buf, bytes) > 5);       /* the glyph is not blank */
   CHECK(count_lit(buf, bytes) < 60);      /* and it is a glyph, not a box */
 
   hal_canvas_clear();
-  hal_draw_chinese(0.0f, 12.0f, "\xE4\xBD\xA0"); /* a CJK code point */
+  hal_draw_chinese(0.0f, (float) ASTRA_VBUF_FONT_H, "\xE4\xBD\xA0"); /* a CJK code point */
   CHECK(count_lit(buf, bytes) > 20);             /* placeholder box drawn */
   CHECK(count_lit(buf, bytes) < 80);
 
   /* All three roles must be accepted and must not change the metrics: this
      backend only owns one 6x12 cell, so the request is recorded and ignored. */
   hal_set_font(ASTRA_FONT_TITLE);
-  CHECK(hal_get_font_height() == 12);
-  CHECK(hal_get_font_width("A") == 6);
+  CHECK(hal_get_font_height() == ASTRA_VBUF_FONT_H);
+  CHECK(hal_get_font_width("A") == ASTRA_VBUF_FONT_W);
   hal_set_font(ASTRA_FONT_SMALL);
-  CHECK(hal_get_font_height() == 12);
+  CHECK(hal_get_font_height() == ASTRA_VBUF_FONT_H);
   hal_set_font(ASTRA_FONT_BODY);
-  CHECK(hal_get_font_height() == 12);
+  CHECK(hal_get_font_height() == ASTRA_VBUF_FONT_H);
 
   hal_destroy();
   printf("ok  text metrics and glyph rasterisation\n");
@@ -277,7 +236,7 @@ static void test_text(void) {
 /* ------------------------------------------------------------------------ */
 
 static void test_flush_hook(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
 
   flush_probe probe;
   memset(&probe, 0, sizeof(probe));
@@ -288,9 +247,9 @@ static void test_flush_hook(void) {
   hal_canvas_update();
 
   CHECK(probe.calls == 1);
-  CHECK(probe.width == 128);
-  CHECK(probe.height == 64);
-  CHECK(pixel_at(probe.last, 128, 3, 4)); /* the host received the frame */
+  CHECK(probe.width == ASTRA_PANEL_WIDTH);
+  CHECK(probe.height == ASTRA_PANEL_HEIGHT);
+  CHECK(pixel_at(probe.last, ASTRA_PANEL_WIDTH, 3, 4)); /* the host received the frame */
 
   hal_canvas_update();
   CHECK(probe.calls == 2);
@@ -304,7 +263,7 @@ static void test_flush_hook(void) {
 }
 
 static void test_clock(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
 
   CHECK(hal_millis() == 0);
 
@@ -327,9 +286,9 @@ static void test_clock(void) {
 }
 
 static void test_screen_off(void) {
-  hal_inject(hal_vbuf_create(NULL));
+  hal_inject(hal_vbuf_create());
   const uint8_t *buf = (const uint8_t *) hal_vbuf_canvas();
-  const size_t bytes = 128 * 64 / 8;
+  const size_t bytes = ASTRA_PANEL_CANVAS_BYTES;
 
   hal_set_draw_type(1);
   hal_draw_box(0.0f, 0.0f, 10.0f, 10.0f);
@@ -355,28 +314,22 @@ static void test_screen_off(void) {
 
 static void test_static_storage(void) {
   static hal_vbuf vbuf;
-  static uint8_t canvas[64 * 64 / 8];
+  static uint8_t canvas[ASTRA_PANEL_CANVAS_BYTES];
 
-  /* Too small on purpose: must be refused rather than overflow. */
-  hal_vbuf_config cfg;
-  hal_vbuf_config_default(&cfg);
-  cfg.width = 128;
-  cfg.height = 64;
-  CHECK(hal_vbuf_init_static(&vbuf, &cfg, canvas, sizeof(canvas)) == NULL);
+  /* 少一个字节就装不下整块画布：必须被拒绝，而不是越界写。 */
+  CHECK(hal_vbuf_init_static(&vbuf, canvas, sizeof(canvas) - 1u) == NULL);
 
-  cfg.width = 64;
-  cfg.height = 64;
-  hal *h = hal_vbuf_init_static(&vbuf, &cfg, canvas, sizeof(canvas));
+  hal *h = hal_vbuf_init_static(&vbuf, canvas, sizeof(canvas));
   CHECK(h == &vbuf.base);
   CHECK(hal_inject(h));
-  CHECK(hal_vbuf_width() == 64);
-  CHECK(hal_vbuf_canvas() == canvas); /* the caller's array, not a copy */
+  CHECK(hal_vbuf_width() == ASTRA_PANEL_WIDTH);
+  CHECK(hal_vbuf_canvas() == canvas); /* 用的是调用者的数组，不是副本 */
 
   hal_set_draw_type(1);
   hal_draw_pixel(0.0f, 0.0f);
   CHECK(canvas[0] == 0x80);
 
-  hal_vbuf_deinit(&vbuf); /* releases nothing: the array stays ours */
+  hal_vbuf_deinit(&vbuf); /* 不释放任何东西：数组仍归调用者 */
   CHECK(canvas[0] == 0x80);
 
   printf("ok  static storage uses the caller's array and is not freed\n");
@@ -384,7 +337,7 @@ static void test_static_storage(void) {
 
 static void test_repeated_cycles(void) {
   for (int i = 0; i < 5; ++i) {
-    hal *h = hal_vbuf_create(NULL);
+    hal *h = hal_vbuf_create();
     CHECK(h != NULL);
     CHECK(hal_inject(h));
     CHECK(hal_vbuf_canvas() != NULL);
@@ -414,9 +367,7 @@ int main(void) {
   _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDOUT);
 #endif
 
-  test_default_geometry();
-  test_custom_geometry();
-  test_invalid_geometry();
+  test_panel_geometry();
   test_canvas_clear_and_layout();
   test_draw_type();
   test_clipping();

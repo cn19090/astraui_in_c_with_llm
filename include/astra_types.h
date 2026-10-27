@@ -15,6 +15,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Panel geometry selection (ASTRA_PANEL). Included here so every module sees
+   the same width/height/font constants. */
+#include "astra_panel.h"
+
 /* Fixed capacities keep every page in static storage. Override any of them at
    build time (e.g. -DASTRA_MENU_POOL_SIZE=16) to trade capability for RAM;
    these three macros are the only knobs that change the static footprint.

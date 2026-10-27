@@ -217,7 +217,8 @@ hal *hal_get(void) { return s_hal; }
 bool hal_check(void) { return s_hal != NULL; }
 
 const astra_sys_config *hal_system_config_or_default(void) {
-  static const astra_sys_config s_default = {128, 64, 255.0f};
+  static const astra_sys_config s_default = {ASTRA_PANEL_WIDTH,
+                                             ASTRA_PANEL_HEIGHT, 255.0f};
   return s_hal != NULL ? &s_hal->config : &s_default;
 }
 

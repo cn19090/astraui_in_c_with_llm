@@ -29,7 +29,7 @@ HAL 是框架与屏幕之间**唯一**的耦合点。框架里没有一行平台
 ```
 
 - [1. 设计模型](#1-设计模型)
-- [2. 分辨率与配置](#2-分辨率与配置)
+- [2. 面板选择](#2-面板选择)
 - [3. 数据结构](#3-数据结构)
 - [4. 生命周期与所有权](#4-生命周期与所有权)
 - [5. 画布契约](#5-画布契约)
@@ -90,149 +90,122 @@ C 保证结构体首成员的地址与结构体地址相同。
 
 ---
 
-## 2. 分辨率与配置
+## 2. 面板选择
 
-面板尺寸是**运行期数据**，不是编译期常量。框架从不假设 128x64：
-它通过 `hal_system_config()` 读宽高，通过 `hal_get_buffer_tile_*()` 读缓冲区几何。
+面板尺寸是**编译期常量**，由 `include/astra_panel.h` 里的 `ASTRA_PANEL` 决定。
+框架、内置字体、缓冲区和示例图标都为同一块面板编译，换屏 = 换一次编译参数。
 
-### 2.1 谁提供尺寸
+### 2.1 为什么不是运行期
 
-| 角色 | 职责 |
+运行期 `width/height` 看起来更灵活，但真正决定观感的是**排版常量**：行高、边距、
+选择框留白、图标放大倍数。这些数字没法可靠地"按比例缩放"出来——
+`round(16 * 0.5) = 8` 和手工挑的 10 差两像素，在 1bpp 屏上就是"字压线"。
+所以每种面板配一套手调数值，代码完全相同，数字不同。
+
+### 2.2 四个内置面板
+
+| 宏 | 分辨率 | 画布 | 内置字体 | 磁贴页 | 图标放大 |
+|---|---|---|---|---|---|
+| `ASTRA_PANEL_128x64` | 128×64 | 1024 B | 6×12 | 有 | ×1 |
+| `ASTRA_PANEL_128x32` | 128×32 | 512 B | 5×8 | 无（太矮） | ×1 |
+| `ASTRA_PANEL_128x128` | 128×128 | 2048 B | 8×16 | 有 | ×2 |
+| `ASTRA_PANEL_240x240` | 240×240 | 7200 B | 12×24 | 有 | ×4 |
+
+`astra_panel.h` 为每种面板定义这些宏，其它文件只引用宏、不写死数字：
+
+| 宏 | 含义 |
 |---|---|
-| 后端 | 在 `create` 时接受配置，分配画布，把宽高写进 `hal.config` |
-| 框架 | 每帧渲染都读 `config`，据此计算布局 |
-| 应用 | 可选：读 `config` 调整自己的排版（字号、行高） |
+| `ASTRA_PANEL_WIDTH` / `ASTRA_PANEL_HEIGHT` | 面板尺寸 |
+| `ASTRA_PANEL_NAME` | 字符串 "128x64" 等，日志用 |
+| `ASTRA_PANEL_TILE_W` / `ASTRA_PANEL_TILE_H` | `宽/8`、`高/8`，画布页数 |
+| `ASTRA_PANEL_CANVAS_BYTES` | 1bpp 画布字节数 |
+| `ASTRA_FONT_TITLE_PX` / `_BODY_PX` / `_SMALL_PX` | 后端 TTF 目标字号 |
+| `ASTRA_VBUF_FONT_SUFFIX` | 选用哪张内置位图字体表 |
+| `ASTRA_VBUF_FONT_W` / `_H` / `_ASCENT` | 位图字体的字宽、字高、基线到字顶 |
+| `ASTRA_PANEL_HAS_TILES` | 面板够不够高放"图标 + 标题" |
+| `ASTRA_PANEL_ICON_SCALE` | 示例磁贴图标的整数放大倍数 |
 
-### 2.2 raylib 后端的配置结构
+### 2.3 怎么选
 
-```c
-typedef struct hal_raylib_config {
-  int width;       /* 面板宽，必须是 8 的倍数，默认 128 */
-  int height;      /* 面板高，必须是 8 的倍数，默认 64  */
-  int window_width;   /* 0 = 自动（面板 × pixel_scale） */
-  int window_height;
-  int pixel_scale;    /* 整数放大倍数，0 = 按窗口自动适配 */
-  const char *title;      /* 窗口标题，NULL 保留当前 */
-  const char *font_path;  /* TTF 路径，NULL 自动探测 */
-  int font_pixel_main;            /* 0 = 由面板高度推导 */
-  int font_pixel_logo_title;
-  int font_pixel_logo_copyright;
-  bool show_bezel;                /* 是否画面板边框 */
-} hal_raylib_config;
+CMake：
+
+```bash
+cmake -S . -B build -DASTRA_PANEL=ASTRA_PANEL_240x240
 ```
 
-三个配套函数：
+命令行：
 
-```c
-void hal_raylib_config_default(hal_raylib_config *cfg);  /* 填默认值 */
-void hal_raylib_window_size(const hal_raylib_config *cfg, int *w, int *h);
-hal *hal_raylib_create_with(const hal_raylib_config *cfg); /* NULL = 默认 */
-hal *hal_raylib_create(void);                              /* 128x64 快捷方式 */
+```bash
+cl /DASTRA_PANEL=ASTRA_PANEL_128x32 ...
 ```
 
-用法（`main.c`）：
+不传就用 `ASTRA_PANEL_128x64`。传了未定义的取值会触发 `#error`；
+尺寸不是 8 的倍数也会触发 `#error`（1bpp page 格式要求）。
 
-```c
-hal_raylib_config cfg;
-hal_raylib_config_default(&cfg);
-cfg.width = 96;
-cfg.height = 48;
+### 2.4 每种面板的排版策略
 
-int ww, wh;
-hal_raylib_window_size(&cfg, &ww, &wh);
-InitWindow(ww, wh, cfg.title ? cfg.title : "astra");
+`astra_config_default()` 按 `ASTRA_PANEL` 分支返回一整套数值。共同的设计约束：
 
-hal_inject(hal_raylib_create_with(&cfg));
-```
+| 顺序（从屏幕顶往下） | 约束 |
+|---|---|
+| 顶部进度条 `tile_bar_height` | 1~8 px，不能压住选择框 |
+| 选择框 `tile_select_box_margin × 2 + tile_pic_height` | 底边必须高于虚线 |
+| 虚线 `screen_height - tile_dotted_line_bottom_margin` | 必须低于选择框、高于标题墨迹 |
+| 磁贴标题 `screen_height - tile_text_bottom_margin + tile_title_height` | 基线不出屏 |
+| 左右箭头 `screen_height - tile_arrow_bottom_margin` | 与标题水平不重叠 |
 
-### 2.3 校验规则
+列表页的约束更简单：`list_line_height >= 字高`，且 `screen_height / list_line_height >= 3`。
 
-`hal_raylib_create_with()` 在这些情况下返回 `NULL`：
-
-- 宽或高 ≤ 0
-- 不是 8 的倍数（1bpp page 格式要求）
-- 宽/8 或 高/8 超过 255（HAL 契约里 tile 计数是 `uint8_t`）
-
-宽或高传 0 表示"用默认值"，不是错误。
-
-### 2.4 字号自动推导
-
-`font_pixel_*` 传 0 时按面板高度推导：
+四种面板实测的排版骨架（由上到下）：
 
 ```
-main           = clamp(height / 5, 8, 16)
-logo_title     = main + 2
-logo_copyright = max(6, main - 4)
+128x64   框 5..41     虚线 46   标题 48..60   箭头 56
+128x128  框 15..85    虚线 94   标题 104..120 箭头 114
+240x240  框 22..158   虚线 184  标题 206..230 箭头 220
+128x32   （无磁贴页）  列表 3 行，行高 10
 ```
 
-于是 64 px 高的面板得到熟悉的 **12 / 14 / 8**；32 px 高得到 8 / 10 / 6（下限 8，
-更小的 TTF 光栅化不可读）。实测：
+`tests/test_panel.c` 把这些不等式写成断言，改任何数字越界都会让测试失败。
 
-| 面板 | 字号 main | 说明 |
-|---|---|---|
-| 128x64 | 12 | 参考尺寸 |
-| 64x64 | 12 | 高度相同，字号不变 |
-| 128x32 | 8 | 触底到下限 |
-| 96x48 | 9 | 48/5 = 9 |
-| 256x64 | 12 | 只看高度 |
-| 64x48 | 9 | 同上 |
+### 2.5 后端侧的字号
 
-### 2.5 框架侧的布局自适应
+raylib 后端的 TTF 字号也是按面板手调的，不再"由高度推导"：
 
-框架所有绘制都以 `hal_system_config()` 为基准，所以**几何自动正确**。
-但排版参数（行高、图标间距、边距）默认是按 128x64 调的，需要按比例缩放：
+| 面板 | 正文 | 标题 | 版权 |
+|---|---|---|---|
+| 128x64 | 12 | 14 | 8 |
+| 128x32 | 10 | 12 | 8 |
+| 128x128 | 16 | 20 | 12 |
+| 240x240 | 20 | 28 | 16 |
 
-```c
-#include "astra_config.h"
+窗口默认放大倍数同样是按面板挑的（6 / 6 / 4 / 2），让四种面板在桌面上的
+物理大小接近。这些只影响 raylib 窗口；`hal_vbuf` 用内置位图字体，与 TTF 无关。
 
-astra_config *ui = astra_ui_config();
-astra_config_fit_to_screen(ui, 128, 32);   /* 缩放排版参数 */
-```
+### 2.6 磁贴图标与面板
 
-`astra_config_fit_to_screen()` 的行为：
+磁贴图标是固定素材（示例为 30×30）。`draw_bmp` 用 `tile_pic_width/height`
+算行宽，所以放大的结果必须真的是一张那么大的位图：示例应用在 `init()` 里
+用 `icon_scale_up()` 按 `ASTRA_PANEL_ICON_SCALE` 做最近邻整块放大，
+×1 时退化成 `memcpy`。
 
-- 缩放因子 `f = min(width / 128, height / 64)`，钳制在 `[0.4, 3.0]`
-- 128x64 时 `f == 1`，**配置完全不变**（保证参考尺寸像素级一致）
-- 缩放行高、边距、选择框、虚线位置、圆角、Logo 尺寸等
-- **不缩放 `tile_pic_width/height`**：它描述的是位图素材本身的尺寸，
-  缩小它会让 `draw_bmp` 按错误的行宽解读数据
-- 重新推导 `tile_select_box_width/height`
+`ASTRA_PANEL_HAS_TILES == 0` 的面板（128×32）装不下"图标 + 标题"，
+示例应用直接把根菜单建成列表页，磁贴相关的 config 字段保留但不使用。
 
-示例应用（`demo/astra_demo.c`）按 **128x64** 固定排版，不再调用它；
-缩放后仍需把 `list_text_height` 校正为后端真实字号、把 `list_line_height`
-抬到至少 `字号 + 上边距`，避免文字裁切或行间重叠——示例应用就是这么做的。
+### 2.7 增加一种新面板
 
-### 2.6 磁贴图标与分辨率
-
-磁贴图标是固定尺寸素材（示例为 30x30，`tile_pic_width/height` 必须等于
-素材真实尺寸）。示例应用固定使用磁贴页，因为它只面向 128x64；
-在更矮的面板上需要自行改用列表页，判据是：
-
-```c
-const float icon_stack = ui->tile_pic_height + ui->tile_pic_top_margin +
-                         ui->tile_text_bottom_margin + 4.0f;
-const bool use_tiles = (float) sys->screen_height >= icon_stack;
-```
-
-### 2.7 已验证的尺寸
-
-外层演示工程的 `tests/test_resolution.c` 覆盖 128x64、64x64、128x32、96x48、256x64、64x48，
-逐项校验：
-
-- `hal_system_config()` 的宽高与请求一致
-- 画布字节数 == `width * height / 8`
-- `get_buffer_tile_width/height` == `width/8`、`height/8`
-- 非法尺寸（如 100x64）被拒绝
+1. 在 `astra_panel.h` 里加一个 id，再加一个 `#elif` 分支，填满上面那张表的宏；
+2. 在 `astra_config.c` 加对应的 `#if` 分支，按上面 2.4 的约束挑数字；
+3. 内置位图字体能复用就复用（`ASTRA_VBUF_FONT_SUFFIX` 指向已有表），
+   否则在 `hal_vbuf.c` 里加一张表；
+4. raylib 后端加一组 `FONT_*` / `PANEL_PIXEL_SCALE`；
+5. `cmake -DASTRA_PANEL=<新宏>` 编译并跑 `astra_test_panel`。
 
 ### 2.8 前端框架之外
 
-分辨率不属于框架的"策略"，框架只消费 HAL 报告的几何。因此：
-
-- 同一份框架目标代码可服务任意尺寸
-- `astra_test_hal` 不链接 raylib，也不关心屏幕尺寸
-- 换屏只改外壳的 `cfg.width/height`，应用与框架代码零改动
-
----
+- 同一份框架**目标代码**只服务一种尺寸；换屏要重新编译。
+- `astra_test_hal` 不链接 raylib，也不关心具体尺寸。
+- 分辨率不属于框架的"策略"：框架只消费 `hal_system_config()` 报告的几何，
+  所以后端仍要在 `create` 时把宽高写进 `hal.config`（用面板宏即可）。
 
 ---
 
@@ -307,7 +280,7 @@ struct hal {
 ```
 
 `config` 由 `hal_construct()` 填成 `astra_sys_config_default()`
-（128×64），可通过 `hal_system_config()` 读写。
+（见 astra_panel.h），可通过 `hal_system_config()` 读写。
 
 结构体里**没有按键状态**：输入不属于 HAL，见第 9 章。
 
@@ -398,7 +371,8 @@ buffer_bytes = width * height / 8
              = tile_width * tile_height * 8
 ```
 
-128×64 时为 `16 * 8 * 8 = 1024` 字节。
+128×64 时为 `16 * 8 * 8 = 1024` 字节；其余面板按 `ASTRA_PANEL_CANVAS_BYTES`：
+128×32 → 512 B，128×128 → 2048 B，240×240 → 7200 B。
 
 > 这正是 SSD1306 GDDRAM 的排布，所以大多数 OLED 驱动可以直接
 > `memcpy` 到屏幕上，无需转换。如果你的驱动是"行优先 1bpp"，
@@ -448,8 +422,14 @@ tile_height = height / 8     /*  64 ->  8 */
 | `draw_pixel` / `draw_v_line` / `draw_h_line` / `draw_box` / `draw_frame` / `draw_bmp` | **左上角** |
 | `draw_english` / `draw_chinese` | **左下角** |
 
-文字左下角基准的含义：`y` 传入的是基线下沿，字形向上生长。
-所以绘制一行文字时，调用方会写 `y = row_top + font_height`。
+文字左下角基准的含义：`y` 传入的是**基线下沿**，字形的墨迹画在 `[y - height, y)` 这个
+`height = get_font_height()` 的单元格里。所以绘制一行文字时，调用方会写
+`y = row_top + font_height`；要把它垂直居中在行高为 `row_h` 的行里，则写
+`y = row_top + (row_h + height) / 2`（框架的列表就是这么算的）。
+
+**墨迹在单元格内应当大致垂直居中**：单元格高度里通常包含一小段上边距（top
+bearing）和一段下伸部（descender）空间。若把墨迹贴着单元格顶部或底部画，
+列表文字看起来就会一律偏高或偏低——即使框架的居中公式是对的。
 
 所有坐标都是 `float`，实现里通常 `lroundf()` 取整。**允许越界**：
 框架会把元素画到屏幕外（滚动动画依赖这一点），实现必须自己裁剪。
@@ -1201,7 +1181,8 @@ bit        = 7 - (x % 8)      /* bit7 = 最左像素 */
 size       = tile_w * tile_h * 8 = width * height / 8
 ```
 
-128×64 时是 1024 字节；8 个 page，每 page 128 字节，页内 128 个像素横向排布。
+字节数由面板决定：128×64 → 1024 B（8 page × 128 B），128×32 → 512 B，
+128×128 → 2048 B，240×240 → 7200 B。页内每字节 8 个像素横向排布。
 
 ### 14.3 用法
 
@@ -1209,14 +1190,7 @@ size       = tile_w * tile_h * 8 = width * height / 8
 #include "hal_vbuf.h"
 
 /* 堆：实例和画布一起分配，hal_destroy() 一并释放 */
-hal_inject(hal_vbuf_create(NULL));            /* NULL => 128x64 */
-
-/* 或者自己给尺寸 */
-hal_vbuf_config cfg;
-hal_vbuf_config_default(&cfg);
-cfg.width = 96;
-cfg.height = 48;
-hal_inject(hal_vbuf_create(&cfg));
+hal_inject(hal_vbuf_create());   /* 几何来自 ASTRA_PANEL，无需参数 */
 ```
 
 两种把画面交出去的方式：
@@ -1256,11 +1230,9 @@ astra_demo_key_set(ASTRA_DEMO_KEY_NEXT, false);  /* 松开 */
 
 ```c
 static hal_vbuf  s_vbuf;
-static uint8_t   s_canvas[128 * 64 / 8];      /* 1024 B */
+static uint8_t   s_canvas[ASTRA_PANEL_CANVAS_BYTES];   /* 1024 B @128x64 */
 
-hal_vbuf_config cfg;
-hal_vbuf_config_default(&cfg);
-hal_vbuf_init_static(&s_vbuf, &cfg, s_canvas, sizeof(s_canvas));
+hal_vbuf_init_static(&s_vbuf, s_canvas, sizeof(s_canvas));
 hal_inject(&s_vbuf.base);
 
 /* ... */
@@ -1272,24 +1244,32 @@ hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
 
 ### 14.6 字体
 
-这个后端只有一套**内置 6×12 ASCII 点阵**（0x20–0x7E），三个 `astra_font_role`
-全部映射到它，`set_font()` 只记录请求、不改变输出：
+这个后端带**四套内置 ASCII 点阵**（0x20–0x7E），编译期按面板选一套：
 
-- `hal_get_font_height()` 恒为 12（与角色无关）
-- `hal_get_font_width()` 为 `字符数 × 6`
-- 非 ASCII 码点（中文等）绘制为 6×12 空心框，表示"缺字形"
+| 面板 | 字模 | 字宽 × 字高 | 基线到字顶 |
+|---|---|---|---|
+| 128x64 | 6×12 | 6 × 12 | 10 |
+| 128x32 | 5×8 | 5 × 8 | 7 |
+| 128x128 | 8×16 | 8 × 16 | 13 |
+| 240x240 | 12×24 | 12 × 24 | 20 |
+
+三个 `astra_font_role` 全部映射到同一套字模，`set_font()` 只记录请求、不改变输出：
+
+- `hal_get_font_height()` 恒为 `ASTRA_VBUF_FONT_H`（与角色无关）
+- `hal_get_font_width()` 为 `字符数 × ASTRA_VBUF_FONT_W`
+- 非 ASCII 码点（中文等）绘制为等宽空心框，表示"缺字形"
+
+"基线到字顶"（`ASTRA_VBUF_FONT_ASCENT`）比字高小 2~4 px，作用是把字形墨迹
+垂直居中在字符格里——否则字形会贴着格子顶部，视觉上比同一行的选择框高。
 
 所以这里**不需要任何字体句柄**，`astra_demo_init()` 也不收字体参数。
 需要多档字号或中文时，请实现自己的后端（框架只把角色与字符串交给后端）。
 
 ### 14.7 尺寸规则
 
-| 规则 | 说明 |
-|---|---|
-| `width`/`height` 必须是 8 的倍数 | 页对齐 |
-| 0 表示"用默认值" | 宽 0 → 128，高 0 → 64 |
-| 负值或非 8 倍数会被拒绝 | `hal_vbuf_create()` 返回 `NULL` |
-| 上限 2040 | 保证 tile 数能放进 `uint8_t` 契约 |
+尺寸不再有运行时校验：宏在编译期就固定了，`astra_panel.h` 用 `#error` 挡住
+非 8 倍数的取值。构造函数只剩一条规则——`hal_vbuf_init_static()` 传入的
+数组必须 ≥ `ASTRA_PANEL_CANVAS_BYTES`，否则返回 `NULL`（不会越界写）。
 
 ### 14.8 与硬件后端的行为差异
 
@@ -1299,11 +1279,11 @@ hal_vbuf_deinit(&s_vbuf);   /* 只清内部状态，s_canvas 仍然是你的 */
 | `delay_ms` | 推进虚拟时钟 | 真阻塞 |
 | `millis` | 虚拟时钟 | 硬件 tick |
 | 按键 | 与应用层无关 | 与应用层无关（两者都不在 HAL 里） |
-| 字体 | 内置 6×12 点阵 | 由你决定（TTF 栅格化、字库芯片…） |
-| 内存 | 画布 1 KiB（128×64） | 通常还要一份面板镜像 |
+| 字体 | 内置点阵（按面板选一套） | 由你决定（TTF 栅格化、字库芯片…） |
+| 内存 | 画布 0.5 / 1 / 2 / 7 KiB | 通常还要一份面板镜像 |
 
-自测：`tests/test_vbuf.c` 覆盖 14 项，包括页布局、三种绘制模式、裁剪、
-刷新回调、虚拟时钟、静态存储与销毁顺序。
+自测：`tests/test_vbuf.c` 覆盖 12 项，包括面板几何、页布局、三种绘制模式、
+裁剪、刷新回调、虚拟时钟、静态存储与销毁顺序。四种面板都跑过。
 
 ---
 
@@ -1367,6 +1347,16 @@ Release `/O2`、MSVC x64 实测，`sizeof` 与 `.data/.bss` 段统计：
 因为指针 4 字节、`float` 4 字节。应用侧的 `astra_selector`(48) 与
 `astra_camera`(20) 由调用方提供存储，不在框架的 `.bss` 里。
 
+以上数字**与面板无关**：`astra_config` 是 176 B、`astra_menu` 是 184 B，
+换 `ASTRA_PANEL` 不改静态池。会随面板变化的只有画布（`hal_vbuf` 堆内或你的静态数组）：
+
+| 面板 | 画布 | `sizeof(hal_vbuf)` |
+|---|---|---|
+| 128x64 | 1024 B | 72 B |
+| 128x32 | 512 B | 72 B |
+| 128x128 | 2048 B | 72 B |
+| 240x240 | 7200 B | 72 B |
+
 ### 16.2 可裁剪的宏
 
 全部可在构建时覆盖，无需改源码：
@@ -1386,13 +1376,14 @@ cmake -S Inc/astra -B build ^
 | `ASTRA_MENU_MAX_CHILDREN` | 8 | 每页 4 B | 不能小于最宽页面的子项数 |
 | `ASTRA_TITLE_MAX` | 24 | 每页 1 B | 超长标题会被 `snprintf` 截断 |
 | `LOGO_STARS_MAX` | 32 | 每颗 12 B | `config.logo_star_num` 默认 16，设 16 即可 |
+| `ASTRA_PANEL` | `ASTRA_PANEL_128x64` | 整套排版数值 + 内置字体 + 画布大小 | 只影响观感与画布，不改静态池 |
 | `ASTRA_PRINT_LINES` / `_COLS` | 8 / 48 | 两者相乘 | 只在用 `hal_print_info()` 时有意义 |
 | `hal_vbuf` 画布 | 按面板 | `w*h/8` | 用 `hal_vbuf_init_static()` 可完全静态 |
 
 ### 16.3 无堆
 
 框架核心**不分配堆内存**。`hal_vbuf_create()` 是唯一会 `malloc` 的路径
-（实例 96 B + 画布）；MCU 上用 `hal_vbuf_init_static()` 换成静态数组，
+（实例 72 B + 画布）；MCU 上用 `hal_vbuf_init_static()` 换成静态数组，
 连 `malloc` 实现都可以不链接。
 
 ### 16.4 每帧绘制量
@@ -1401,7 +1392,7 @@ cmake -S Inc/astra -B build ^
 
 | 元素 | 调用次数 |
 |---|---|
-| 磁贴图标 | 1 `draw_bmp` / 项（30×30 = 900 像素） |
+| 磁贴图标 | 1 `draw_bmp` / 项（30×30 = 900 像素，大面板放大后最多 120×120） |
 | 列表文字 | 1 `draw_chinese` / 行 |
 | 选择框 | 8 `draw_h/v_line` + 2 `draw_pixel`（磁贴）或 1 `draw_rbox`（列表） |
 | 进度条 / 箭头 / 虚线 | 约 15 次 |
