@@ -25,9 +25,13 @@
 //
 //   hal_vbuf_set_flush(my_i2c_send, &my_bus);
 //
-// The buffer layout is exactly an SSD1306 GDDRAM: one bit per pixel, page
-// major, byte index (y * width + x) / 8, bit 7 = leftmost pixel. So the usual
-// "set page, write 128 bytes" loop works on it unmodified.
+// The buffer is a plain **row-major** 1bpp bitmap: one bit per pixel, row y
+// occupies bytes [y * width / 8, (y + 1) * width / 8), byte index
+// (y * width + x) / 8, bit 7 = leftmost pixel.
+//
+// NOTE: this is *not* the SSD1306 GDDRAM layout (page-major, byte index
+// (y / 8) * width + x, bit 0 = top of the page). A driver for a real panel has
+// to transpose the buffer before sending it; see the flush callback below.
 //
 #ifndef ASTRA_HAL_VBUF_H_
 #define ASTRA_HAL_VBUF_H_

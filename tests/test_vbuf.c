@@ -151,7 +151,7 @@ static void test_canvas_clear_and_layout(void) {
   hal_draw_pixel(0.0f, 0.0f);
   CHECK(pixel_at(buf, 128, 0, 0));
   CHECK(!pixel_at(buf, 128, 1, 0));
-  /* Byte 0, bit 7 is the top-left pixel: the SSD1306 page layout. */
+  /* Row-major 1bpp: byte 0, bit 7 is the top-left pixel. */
   CHECK(buf[0] == 0x80);
 
   hal_draw_pixel(8.0f, 0.0f); /* first pixel of the next byte */

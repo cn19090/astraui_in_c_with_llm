@@ -694,6 +694,11 @@ void hal_print_info(const char *msg);
 用于"开机自检"这类场景。**它自己完成 clear + 绘制 + update**，
 因此是阻塞的，不要在渲染循环里调用。
 
+> `vbuf` 后端的 `print_info` 会用 `printf` 打到 stdout。裸机（`__arm__`）上默认关闭，
+> 因为 Arm C 库的 `printf` 走半主机（`BKPT 0xAB`），没有调试器接管时表现为
+> "halted due to breakpoint"。需要时用 `-DASTRA_VBUF_USE_PRINTF=1` 打开。
+
+
 ### 10.4 配置热更新
 
 ```c
