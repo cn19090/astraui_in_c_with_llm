@@ -251,6 +251,7 @@ astra_demo_update();
 | `ASTRA_PANEL_128x32` | 128×32 | 512 B | 5×8 | 无（太矮） |
 | `ASTRA_PANEL_128x128` | 128×128 | 2048 B | 8×16 | 有 |
 | `ASTRA_PANEL_240x240` | 240×240 | 7200 B | 12×24 | 有 |
+| `ASTRA_PANEL_240x135` | 240×135 | 4050 B | 8×16 | 有 |
 
 ```bash
 cmake -S Inc/astra -B build -DASTRA_PANEL=ASTRA_PANEL_128x32

@@ -15,6 +15,15 @@
 /* animation helpers                                                         */
 /* ------------------------------------------------------------------------ */
 
+/* Full canvas size in bytes: row-major 1bpp, so stride * rows. Derived from the
+   backend's reported geometry rather than sizeof() anything, and exact for
+   heights that are not a multiple of 8. */
+static uint32_t canvas_bytes(void) {
+  const astra_sys_config *sys = hal_system_config_or_default();
+  return (uint32_t) ((uint32_t) sys->screen_weight *
+                     (uint32_t) sys->screen_height / 8u);
+}
+
 void astra_anim_step(float *pos, float trg, float speed) {
   if (*pos == trg) return;
 
@@ -35,10 +44,9 @@ void astra_anim_exit(astra_menu *menu) {
   static uint8_t fade_flag = 1;
 
   /* Recomputed every call: the canvas size is runtime data (it follows the
-     configured panel), so caching it here would overflow the buffer when the
-     resolution changes between calls. */
-  const uint32_t buffer_len = 8u * hal_get_buffer_tile_height() *
-                              hal_get_buffer_tile_width();
+     configured panel). canvas_bytes = stride * rows, which is exact even for
+     panels whose height is not a multiple of 8 (e.g. 240x135). */
+  const uint32_t buffer_len = canvas_bytes();
 
   uint8_t *buf = (uint8_t *) hal_get_canvas_buffer();
   if (buf == NULL) return;
@@ -102,8 +110,7 @@ void astra_anim_blur(astra_menu *menu) {
 
   /* Recomputed per call, like astra_anim_exit(): the canvas size follows the
      configured panel. */
-  const uint32_t buffer_len = 8u * hal_get_buffer_tile_height() *
-                              hal_get_buffer_tile_width();
+  const uint32_t buffer_len = canvas_bytes();
 
   uint8_t *buf = (uint8_t *) hal_get_canvas_buffer();
   if (buf == NULL) return;

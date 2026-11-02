@@ -110,6 +110,7 @@ C 保证结构体首成员的地址与结构体地址相同。
 | `ASTRA_PANEL_128x32` | 128×32 | 512 B | 5×8 | 无（太矮） | ×1 |
 | `ASTRA_PANEL_128x128` | 128×128 | 2048 B | 8×16 | 有 | ×2 |
 | `ASTRA_PANEL_240x240` | 240×240 | 7200 B | 12×24 | 有 | ×4 |
+| `ASTRA_PANEL_240x135` | 240×135 | 4050 B | 8×16 | 有 | ×2 |
 
 `astra_panel.h` 为每种面板定义这些宏，其它文件只引用宏、不写死数字：
 
@@ -117,7 +118,7 @@ C 保证结构体首成员的地址与结构体地址相同。
 |---|---|
 | `ASTRA_PANEL_WIDTH` / `ASTRA_PANEL_HEIGHT` | 面板尺寸 |
 | `ASTRA_PANEL_NAME` | 字符串 "128x64" 等，日志用 |
-| `ASTRA_PANEL_TILE_W` / `ASTRA_PANEL_TILE_H` | `宽/8`、`高/8`，画布页数 |
+| ``ASTRA_PANEL_TILE_W`` / ``ASTRA_PANEL_TILE_H`` | 每行字节数（``宽/8``）、行数（``高``，不必是 8 的倍数） |
 | `ASTRA_PANEL_CANVAS_BYTES` | 1bpp 画布字节数 |
 | `ASTRA_FONT_TITLE_PX` / `_BODY_PX` / `_SMALL_PX` | 后端 TTF 目标字号 |
 | `ASTRA_VBUF_FONT_SUFFIX` | 选用哪张内置位图字体表 |
@@ -140,7 +141,7 @@ cl /DASTRA_PANEL=ASTRA_PANEL_128x32 ...
 ```
 
 不传就用 `ASTRA_PANEL_128x64`。传了未定义的取值会触发 `#error`；
-尺寸不是 8 的倍数也会触发 `#error`（1bpp page 格式要求）。
+尺寸不是 8 的倍数也会触发 `#error`（行优先 1bpp 要求每行字节对齐）。
 
 ### 2.4 每种面板的排版策略
 
@@ -156,12 +157,13 @@ cl /DASTRA_PANEL=ASTRA_PANEL_128x32 ...
 
 列表页的约束更简单：`list_line_height >= 字高`，且 `screen_height / list_line_height >= 3`。
 
-四种面板实测的排版骨架（由上到下）：
+五种面板实测的排版骨架（由上到下）：
 
 ```
 128x64   框 5..41     虚线 46   标题 48..60   箭头 56
 128x128  框 15..85    虚线 94   标题 104..120 箭头 114
 240x240  框 22..158   虚线 184  标题 206..230 箭头 220
+240x135  框 17..87    虚线 105  标题 113..129 箭头 121
 128x32   （无磁贴页）  列表 3 行，行高 10
 ```
 
@@ -175,10 +177,11 @@ raylib 后端的 TTF 字号也是按面板手调的，不再"由高度推导"：
 |---|---|---|---|
 | 128x64 | 12 | 14 | 8 |
 | 128x32 | 10 | 12 | 8 |
+| 240x135 | 16 | 22 | 10 |
 | 128x128 | 16 | 20 | 12 |
 | 240x240 | 20 | 28 | 16 |
 
-窗口默认放大倍数同样是按面板挑的（6 / 6 / 4 / 2），让四种面板在桌面上的
+窗口默认放大倍数同样是按面板挑的（6 / 6 / 4 / 2 / 3），让五种面板在桌面上的
 物理大小接近。这些只影响 raylib 窗口；`hal_vbuf` 用内置位图字体，与 TTF 无关。
 
 ### 2.6 磁贴图标与面板
@@ -353,41 +356,69 @@ void hal_destroy(void) {
 
 ### 4.1 缓冲区布局
 
-框架在 `hal_get_canvas_buffer()` 返回的内存里直接按 **1bpp page 格式** 读写：
+框架在 `hal_get_canvas_buffer()` 返回的内存里直接按 **行优先（row-major）1bpp**
+读写——**一个字节是水平方向的 8 个像素**：
 
 ```
-每个字节 = 垂直方向的 8 个像素
-bit7 = 该页最上面一行（y 最小），bit0 = 最下面一行
+bit7 = 该字节最左边（x 最小）的像素，bit0 = 最右边
+1 = 点亮，0 = 熄灭
 
-索引 = (y * width + x) / 8
-位序 = 7 - (x % 8)
+字节下标 = (y * width + x) / 8   ==   y * (width / 8) + (x / 8)
+位序     = 7 - (x % 8)           掩码 = 0x80 >> (x % 8)
+行跨度   = width / 8 字节
 ```
 
 总大小：
 
 ```
-buffer_bytes = width * height / 8
-             = (tile_width * 8) * (tile_height * 8) / 8
-             = tile_width * tile_height * 8
+buffer_bytes = width * height / 8   == ASTRA_PANEL_CANVAS_BYTES
 ```
 
-128×64 时为 `16 * 8 * 8 = 1024` 字节；其余面板按 `ASTRA_PANEL_CANVAS_BYTES`：
-128×32 → 512 B，128×128 → 2048 B，240×240 → 7200 B。
+128×64 时为 `128 * 64 / 8 = 1024` 字节（每行 16 字节 × 64 行）；其余面板按
+`ASTRA_PANEL_CANVAS_BYTES`：128×32 → 512 B，128×128 → 2048 B，240×240 → 7200 B。
 
-> 这正是 SSD1306 GDDRAM 的排布，所以大多数 OLED 驱动可以直接
-> `memcpy` 到屏幕上，无需转换。如果你的驱动是"行优先 1bpp"，
-> 请在 `canvas_update()` 里转换。
+以 128×64 为例，前 3 行的字节分布：
+
+```
+byte  0 : y=0, x=0..7      byte  1 : y=0, x=8..15   ...  byte 15 : y=0, x=120..127
+byte 16 : y=1, x=0..7      byte 17 : y=1, x=8..15   ...  byte 31 : y=1, x=120..127
+byte 32 : y=2, x=0..7      ...
+```
+
+> **这不是 SSD1306 GDDRAM 的排布。** GDDRAM 是页优先（page-major）：一个字节是
+> **垂直**方向 8 个像素，`byte = (y / 8) * width + x`，`bit = y % 8`。两者互为
+> 转置，所以给真实 SSD1306 写驱动时**必须转置**，不能直接 `memcpy`：
+>
+> ```c
+> /* 行优先 1bpp -> SSD1306 页格式，供 canvas_update 里的传输层使用 */
+> for (int page = 0; page < height / 8; ++page)
+>   for (int x = 0; x < width; ++x) {
+>     uint8_t out = 0;
+>     for (int b = 0; b < 8; ++b) {
+>       const uint8_t src = buffer[(page * 8 + b) * width / 8 + x / 8];
+>       out |= (uint8_t)(((src >> (7 - (x & 7))) & 1u) << b);
+>     }
+>     send_byte(out);        /* 该页该列，低位在上 */
+>   }
+> ```
+>
+> 选行优先的理由：它是 PBM/PNG 等位图格式的自然布局，截图与单元测试可以直接
+> 比对；而 SSD1306 的页格式需要每个驱动各写一次转置，代价固定在移植层。
 
 ### 4.2 `get_buffer_tile_width` / `get_buffer_tile_height`
 
-返回**字节数**（不是像素数）：
+一个报**每行字节数**，一个报**行数**（都不是像素数，也不是"页数"）：
 
 ```c
-tile_width  = width  / 8     /* 128 -> 16 */
-tile_height = height / 8     /*  64 ->  8 */
+tile_width  = width  / 8     /* 每行字节数：128 -> 16, 240 -> 30 */
+tile_height = height         /* 行数：64 -> 64, 135 -> 135 */
 ```
 
-框架用它们计算缓冲区长度（淡出动画）和分页。
+于是 `canvas_bytes = tile_width * tile_height`，对高度不是 8 的倍数的面板
+（如 240×135）也是精确的。框架用它们算缓冲区长度（淡出/模糊动画）。
+
+两个值都通过 `uint8_t` 传递，因此面板上限是 255 行、每行 255 字节（2040 px 宽）；
+`astra_panel.h` 在编译期用 `#error` 挡住越界的取值。
 
 ### 4.3 `canvas_clear`
 
@@ -744,7 +775,7 @@ typedef struct {
 ```c
 static void *mine_canvas(hal *self)       { return ((hal_mine *) self)->buffer; }
 static uint8_t mine_tile_w(hal *self)     { (void) self; return 16; }
-static uint8_t mine_tile_h(hal *self)     { (void) self; return 8; }
+static uint8_t mine_tile_h(hal *self)     { (void) self; return 64; }   /* 行数 */
 static void mine_clear(hal *self)         { memset(((hal_mine *) self)->buffer, 0, 1024); }
 static void mine_flush(hal *self)         { oled_write(((hal_mine *) self)->buffer, 1024); }
 ```
@@ -909,13 +940,13 @@ hal_inject(hal_mine_create());
 #define W 128
 #define H 64
 #define TILE_W (W / 8)
-#define TILE_H (H / 8)
+#define ROWS   H
 #define FONT_W 8
 #define FONT_H 16
 
 typedef struct {
   hal base;
-  uint8_t buffer[TILE_W * TILE_H * 8];
+  uint8_t buffer[TILE_W * ROWS];
   uint8_t draw_type;
   bool display_on;
 } hal_ssd1306;
@@ -924,7 +955,7 @@ typedef struct {
 
 static void *ss_canvas(hal *self) { return ((hal_ssd1306 *) self)->buffer; }
 static uint8_t ss_tile_w(hal *self) { (void) self; return TILE_W; }
-static uint8_t ss_tile_h(hal *self) { (void) self; return TILE_H; }
+static uint8_t ss_tile_h(hal *self) { (void) self; return ROWS; }
 
 static void ss_clear(hal *self) {
   memset(((hal_ssd1306 *) self)->buffer, 0, sizeof(((hal_ssd1306 *) self)->buffer));
@@ -932,12 +963,25 @@ static void ss_clear(hal *self) {
 
 static void ss_flush(hal *self) {
   hal_ssd1306 *s = (hal_ssd1306 *) self;
-  if (!s->display_on) {
-    uint8_t blank[TILE_W * TILE_H * 8] = {0};
-    ssd1306_send(blank, sizeof(blank));
-    return;
+
+  /* 框架的缓冲区是行优先 1bpp，SSD1306 GDDRAM 是页优先（一个字节垂直 8 像素），
+     两者互为转置，必须逐页转换后再发。 */
+  uint8_t page_buf[TILE_W * ROWS];
+  memset(page_buf, 0, sizeof(page_buf));
+
+  if (s->display_on) {
+    for (int page = 0; page < H / 8; ++page)
+      for (int x = 0; x < W; ++x) {
+        uint8_t bits = 0;
+        for (int b = 0; b < 8; ++b) {
+          const uint8_t src = s->buffer[(page * 8 + b) * (W / 8) + x / 8];
+          bits |= (uint8_t) (((src >> (7 - (x & 7))) & 1u) << b);
+        }
+        page_buf[page * W + x] = bits;   /* 每页 W 字节，低位在上 */
+      }
   }
-  ssd1306_send(s->buffer, sizeof(s->buffer));
+
+  ssd1306_send(page_buf, sizeof(page_buf));
 }
 
 /* ---------- primitives ---------- */
@@ -1173,16 +1217,20 @@ for (;;) {
 
 ### 14.2 缓冲区布局
 
-与 SSD1306 GDDRAM **完全一致**，所以你现有的"按页写 128 字节"代码可以直接复用：
+和 `hal_get_canvas_buffer()` 暴露的是同一块内存：**行优先 1bpp**，一个字节是
+水平方向 8 个像素。
 
 ```
-byte_index = (y * width + x) / 8
-bit        = 7 - (x % 8)      /* bit7 = 最左像素 */
-size       = tile_w * tile_h * 8 = width * height / 8
+byte_index = (y * width + x) / 8     /* 行跨度 = width / 8 */
+bit        = 7 - (x % 8)             /* bit7 = 最左像素，1 = 点亮 */
+size       = width * height / 8
 ```
 
-字节数由面板决定：128×64 → 1024 B（8 page × 128 B），128×32 → 512 B，
-128×128 → 2048 B，240×240 → 7200 B。页内每字节 8 个像素横向排布。
+字节数由面板决定：128×64 → 1024 B（每行 16 B × 64 行），128×32 → 512 B，
+128×128 → 2048 B，240×240 → 7200 B。
+
+> 注意这**不是** SSD1306 GDDRAM 的页格式（那是一个字节垂直 8 个像素）。
+> 直接 `memcpy` 到 SSD1306 会得到转置后的乱码，必须像 4.1 节那样逐页转置。
 
 ### 14.3 用法
 
@@ -1260,6 +1308,7 @@ hal_inject(&tmp.base);
 |---|---|---|---|
 | 128x64 | 6×12 | 6 × 12 | 10 |
 | 128x32 | 5×8 | 5 × 8 | 7 |
+| 240x135 | 8×16 | 8 × 16 | 13 |
 | 128x128 | 8×16 | 8 × 16 | 13 |
 | 240x240 | 12×24 | 12 × 24 | 20 |
 
@@ -1293,7 +1342,7 @@ hal_inject(&tmp.base);
 | 内存 | 画布内嵌在实例里，0 次分配 | 通常还要一份面板镜像 |
 
 自测：`tests/test_vbuf.c` 覆盖 12 项，包括面板几何、页布局、三种绘制模式、
-裁剪、刷新回调、虚拟时钟、内嵌画布与销毁顺序。四种面板都跑过。
+裁剪、刷新回调、虚拟时钟、内嵌画布与销毁顺序。五种面板都跑过。
 
 ---
 
@@ -1364,6 +1413,7 @@ Release `/O2`、MSVC x64 实测，`sizeof` 与 `.data/.bss` 段统计：
 |---|---|---|
 | 128x64 | 1024 B | 1,096 B |
 | 128x32 | 512 B | 584 B |
+| 240x135 | 4050 B | 4,122 B |
 | 128x128 | 2048 B | 2,120 B |
 | 240x240 | 7200 B | 7,272 B |
 
@@ -1415,10 +1465,10 @@ cmake -S Inc/astra -B build ^
 
 ### 16.5 优化建议
 
-1. **`canvas_update()` 只发变化页**：记录脏页范围，只传改动的 page。
+1. **`canvas_update()` 只发行区间**：记录脏行范围，只传改动过的字节。
 2. **I2C 用 DMA**：把 23 ms 的阻塞传输变成后台进行。
-3. **`draw_box` 按 page 整字节写**：大于 8 像素宽的矩形可整字节填充，
-   比逐像素快约 8 倍。
+3. **`draw_box` 按整字节写**：横向覆盖 ≥8 像素的矩形可整字节填充，
+   比逐像素快约 8 倍（边界字节仍需逐位处理）。
 4. **字号只保留实际用到的**：`get_font_width` 每次调用都会遍历字符串，
    列表选择框每帧都会调用它——如果性能敏感，可在菜单里缓存宽度。
 5. **软浮点**：Cortex-M0/M3 没有 FPU，框架的 `float` 坐标与插值全部走
@@ -1436,8 +1486,10 @@ cmake -S Inc/astra -B build ^
 - [ ] `hal` 是结构体第一个成员
 - [ ] ops 表从 `astra_hal_default_ops` 派生，且存放在静态区
 - [ ] `ops` 里没有 NULL（派生方式天然满足）
-- [ ] 缓冲区布局为 1bpp page 格式，大小 `tile_w * tile_h * 8`
-- [ ] `get_buffer_tile_width/height` 返回**字节数**
+- [ ] 缓冲区布局为**行优先 1bpp**：`byte = (y * width + x) / 8`，`bit = 7 - (x % 8)`，
+      大小 `width * height / 8`（框架假定这个布局，见 4.1）
+- [ ] `get_buffer_tile_width` 返回**每行字节数**（`width/8`），`get_buffer_tile_height`
+      返回**行数**（`height`，不必是 8 的倍数）
 - [ ] 绘制函数自行裁剪越界坐标
 - [ ] `set_draw_type` 的三种模式都实现（clear / solid / invert）
 - [ ] 文字按**左下角**定位

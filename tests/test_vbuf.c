@@ -89,13 +89,16 @@ static void test_panel_geometry(void) {
   CHECK(hal_vbuf_height() == ASTRA_PANEL_HEIGHT);
   CHECK(hal_get_font_height() == ASTRA_VBUF_FONT_H);
 
-  /* The canvas is exactly one page per tile: no slack, no rounding. */
-  CHECK((size_t) ASTRA_PANEL_TILE_W * ASTRA_PANEL_TILE_H * 8u ==
+  /* The canvas is exactly stride * rows: no slack, no rounding. Heights that
+     are not a multiple of 8 (e.g. 240x135) must come out exact. */
+  CHECK((size_t) ASTRA_PANEL_TILE_W * ASTRA_PANEL_TILE_H ==
+        (size_t) ASTRA_PANEL_CANVAS_BYTES);
+  CHECK((size_t) ASTRA_PANEL_WIDTH * ASTRA_PANEL_HEIGHT / 8u ==
         (size_t) ASTRA_PANEL_CANVAS_BYTES);
 
   hal_destroy();
-  printf("ok  panel %s geometry: %d tiles, %d canvas bytes, %d px font\n",
-         ASTRA_PANEL_NAME, ASTRA_PANEL_TILE_W * ASTRA_PANEL_TILE_H,
+  printf("ok  panel %s geometry: %d B/row x %d rows = %d bytes, %d px font\n",
+         ASTRA_PANEL_NAME, ASTRA_PANEL_TILE_W, ASTRA_PANEL_TILE_H,
          ASTRA_PANEL_CANVAS_BYTES, ASTRA_VBUF_FONT_H);
 }
 
@@ -127,7 +130,7 @@ static void test_canvas_clear_and_layout(void) {
   CHECK(count_lit(buf, bytes) == 0);
 
   hal_destroy();
-  printf("ok  canvas uses the 1bpp page layout of an SSD1306\n");
+  printf("ok  canvas uses the row-major 1bpp layout\n");
 }
 
 static void test_draw_type(void) {

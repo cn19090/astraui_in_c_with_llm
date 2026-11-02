@@ -37,9 +37,11 @@ struct hal_ops {
   /* Called by hal_destroy() before the instance is released. */
   void (*deinit)(hal *self);
 
-  /* --- canvas (1bpp page layout, same as an SSD1306 buffer) --- */
+  /* --- canvas (row-major 1bpp: one byte = 8 horizontally adjacent pixels) --- */
   void *(*get_canvas_buffer)(hal *self);
+  /* Bytes per row (= width / 8). */
   uint8_t (*get_buffer_tile_width)(hal *self);
+  /* Number of rows (= height; need not be a multiple of 8). */
   uint8_t (*get_buffer_tile_height)(hal *self);
   void (*canvas_update)(hal *self);
   void (*canvas_clear)(hal *self);

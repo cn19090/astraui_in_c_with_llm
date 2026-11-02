@@ -40,20 +40,23 @@ typedef struct {
   hal base;
   int init_calls;
   int deinit_calls;
-  uint8_t buffer[16 * 8 * 8];
+  /* Must match the geometry the fake reports below: astra_anim_exit()/blur()
+     write canvas_bytes = stride * rows into this array. */
+  uint8_t buffer[ASTRA_PANEL_CANVAS_BYTES];
 } fake_hal;
 
 static void fake_init(hal *self) { ((fake_hal *) self)->init_calls++; }
 static void fake_deinit(hal *self) { ((fake_hal *) self)->deinit_calls++; }
 
 static void *fake_canvas(hal *self) { return ((fake_hal *) self)->buffer; }
+/* Row-major 1bpp: stride in bytes, then row count. */
 static uint8_t fake_tile_w(hal *self) {
   (void) self;
-  return 16;
+  return (uint8_t) ASTRA_PANEL_TILE_W;
 }
 static uint8_t fake_tile_h(hal *self) {
   (void) self;
-  return 8;
+  return (uint8_t) ASTRA_PANEL_TILE_H;
 }
 static void fake_clear(hal *self) {
   memset(((fake_hal *) self)->buffer, 0, sizeof(((fake_hal *) self)->buffer));

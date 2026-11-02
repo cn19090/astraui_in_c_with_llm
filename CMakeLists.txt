@@ -63,7 +63,7 @@ target_include_directories(astra PUBLIC
 # ---------------------------------------------------------------------------
 set(ASTRA_PANEL "ASTRA_PANEL_128x64" CACHE STRING "Target OLED panel")
 set_property(CACHE ASTRA_PANEL PROPERTY STRINGS
-    ASTRA_PANEL_128x64 ASTRA_PANEL_128x32 ASTRA_PANEL_128x128 ASTRA_PANEL_240x240)
+    ASTRA_PANEL_128x64 ASTRA_PANEL_128x32 ASTRA_PANEL_128x128 ASTRA_PANEL_240x240 ASTRA_PANEL_240x135)
 
 set(ASTRA_MENU_POOL_SIZE 32 CACHE STRING "Number of page objects (pool size)")
 set(ASTRA_MENU_MAX_CHILDREN 8 CACHE STRING "Max children per page")

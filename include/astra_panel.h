@@ -14,6 +14,7 @@
 //   ASTRA_PANEL_128x32    SSD1306 half height (wide and short)
 //   ASTRA_PANEL_128x128   square 1.5" panels
 //   ASTRA_PANEL_240x240   large square panels (ST7701/GC9A01 class)
+//   ASTRA_PANEL_240x135   wide and short colour panels (ST7789 1.14" class)
 //
 // Why compile-time instead of a runtime width/height pair: every layout
 // constant, the built-in bitmap font and the sample icons are all sized for one
@@ -30,6 +31,7 @@
 #define ASTRA_PANEL_128x32 2
 #define ASTRA_PANEL_128x128 3
 #define ASTRA_PANEL_240x240 4
+#define ASTRA_PANEL_240x135 5
 
 /* Default: the reference 128x64 module. */
 #ifndef ASTRA_PANEL
@@ -127,19 +129,51 @@
 #define ASTRA_PANEL_HAS_TILES 1
 #define ASTRA_PANEL_ICON_SCALE 4
 
+/* ------------------------------------------------------------------------ */
+/* 240 x 135 - wide and short (ST7789 1.14" class)                          */
+/* ------------------------------------------------------------------------ */
+#elif ASTRA_PANEL == ASTRA_PANEL_240x135
+
+#define ASTRA_PANEL_WIDTH 240
+#define ASTRA_PANEL_HEIGHT 135
+#define ASTRA_PANEL_NAME "240x135"
+
+#define ASTRA_FONT_TITLE_PX 22
+#define ASTRA_FONT_BODY_PX 16
+#define ASTRA_FONT_SMALL_PX 10
+
+#define ASTRA_VBUF_FONT_SUFFIX 8X16
+#define ASTRA_VBUF_FONT_W 8
+#define ASTRA_VBUF_FONT_H 16
+#define ASTRA_VBUF_FONT_ASCENT 13
+
+#define ASTRA_PANEL_HAS_TILES 1
+#define ASTRA_PANEL_ICON_SCALE 2
+
 #else
-#error "Unknown ASTRA_PANEL: use ASTRA_PANEL_128x64 / _128x32 / _128x128 / _240x240"
+#error "Unknown ASTRA_PANEL: use ASTRA_PANEL_128x64 / _128x32 / _128x128 / _240x240 / _240x135"
 #endif
 
-/* The canvas is handed out in 1bpp pages, and the HAL reports the tile counts
-   as uint8_t. */
-#if (ASTRA_PANEL_WIDTH % 8) != 0 || (ASTRA_PANEL_HEIGHT % 8) != 0
-#error "ASTRA_PANEL dimensions must be multiples of 8"
+/* The canvas is row-major 1bpp: one byte spans width/8 horizontally adjacent
+   pixels, rows are independent. So only the *width* has to be a multiple of 8
+   (each row must start on a byte boundary); the height is free - 135 px tall
+   panels are common and need no padding. */
+#if (ASTRA_PANEL_WIDTH % 8) != 0
+#error "ASTRA_PANEL_WIDTH must be a multiple of 8 (row-major 1bpp stride)"
 #endif
 
+/* Bytes per row. */
 #define ASTRA_PANEL_TILE_W (ASTRA_PANEL_WIDTH / 8)
-#define ASTRA_PANEL_TILE_H (ASTRA_PANEL_HEIGHT / 8)
+/* Number of rows. */
+#define ASTRA_PANEL_TILE_H (ASTRA_PANEL_HEIGHT)
+/* canvas_bytes = stride * rows. */
 #define ASTRA_PANEL_CANVAS_BYTES \
-  (ASTRA_PANEL_TILE_W * ASTRA_PANEL_TILE_H * 8)
+  (ASTRA_PANEL_TILE_W * ASTRA_PANEL_TILE_H)
+
+/* The HAL reports both as uint8_t, which caps the panel at 255 rows / 255
+   bytes per row. */
+#if (ASTRA_PANEL_HEIGHT) > 255 || (ASTRA_PANEL_TILE_W) > 255
+#error "ASTRA_PANEL exceeds the uint8_t tile contract (max 255 rows / 2040 px wide)"
+#endif
 
 #endif /* ASTRA_PANEL_H_ */

@@ -146,6 +146,45 @@ astra_config astra_config_default(void)
   c.logo_copy_right_height = 14.0f;
   c.logo_star_num = 32;
 
+#elif ASTRA_PANEL == ASTRA_PANEL_240x135
+  /* ---------- 240x135: 宽而矮，五个列表行，图标画 2 倍 ---------- */
+  c.list_bar_weight = 5.0f;
+  c.list_text_height = 16.0f;
+  c.list_text_margin = 8.0f;
+  c.list_line_height = 24.0f;
+  c.selector_radius = 0.5f;
+  c.selector_margin = 6.0f;
+  c.selector_top_margin = 2.0f;
+  c.list_page_turning_mode = 1;
+
+  /* 竖直方向是稀缺资源：图标 60x60（30x30 素材 2 倍），上下留白压到最小，
+     但必须保证 选择框 → 虚线 → 标题 → 箭头 四段不重叠。
+     可用竖直空间 = y2（进度条下）到 y105（虚线）= 103 px，选择框高 70 px，
+     所以上边距取 22 让框（17..87）在带内居中，上下各留 15 / 18 px。 */
+  c.tile_pic_width = 60.0f; /* 30x30 asset drawn 2x (ASTRA_PANEL_ICON_SCALE) */
+  c.tile_pic_height = 60.0f;
+  c.tile_pic_margin = 24.0f;
+  c.tile_pic_top_margin = 22.0f;             /* 选择框在 y = 17..87 */
+  c.tile_arrow_width = 8.0f;
+  c.tile_arrow_margin = 10.0f;
+  c.tile_dotted_line_bottom_margin = 30.0f; /* 虚线在 y = 105 */
+  c.tile_arrow_bottom_margin = 14.0f;        /* 箭头在 y = 121 */
+  c.tile_text_bottom_margin = 22.0f;         /* 基线 129，字顶 113 */
+  c.tile_bar_height = 2.0f;
+  c.tile_select_box_line_length = 6.0f;
+  c.tile_select_box_margin = 5.0f; /* 选择框 = 图标 ± 5 */
+  c.tile_title_height = 16.0f;
+  c.tile_btn_margin = 18.0f;
+
+  c.pop_margin = 8.0f;
+  c.pop_radius = 3.0f;
+  c.pop_speed = 90.0f;
+
+  c.logo_star_length = 3.0f;
+  c.logo_text_height = 22.0f;
+  c.logo_copy_right_height = 10.0f;
+  c.logo_star_num = 20;
+
 #else
   /* ---------------- 128x64: the reference layout ---------------- */
   c.list_bar_weight = 5.0f;
